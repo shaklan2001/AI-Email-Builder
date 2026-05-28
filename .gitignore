@@ -1,0 +1,31 @@
+# OS
+.DS_Store
+
+# Secrets & env (never commit real keys)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.local
+**/.env.*.local
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+*.p12
+credentials.json
+secrets.json
+
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.ruff_cache/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE / local
+.cursor/
+*.log
