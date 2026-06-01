@@ -1,0 +1,156 @@
+import json
+import re
+
+from groq import AsyncGroq, GroqError
+
+from app.core.config import settings
+from app.providers.llm.base import LLMProvider, LLMProviderError
+from app.schemas.campaign import CampaignData
+
+_EXTRACTION_SYSTEM = """You are a sales and marketing campaign strategist.
+Extract campaign information from the conversation.
+Return ONLY valid JSON with these keys (use null for unknown):
+campaign_name, business_goal, product_info, audience, tone, cta, landing_page, product_image
+
+Rules:
+- If the user says skip, none, don't know, not sure, or no preference for a field, leave that field null.
+- Only product_info is strictly required; other fields may be omitted.
+- campaign_name: user-facing campaign title when they name the campaign
+- landing_page: website or landing URL only — not product image links (normalize bare domains to https://...)
+- product_image: product image URL when the user shares a picture link
+- audience: summarize target audience (e.g. "Age 16–35")
+- product_info: the product or service being promoted (not old products from earlier in the chat)
+Do not include markdown or explanation."""
+
+_EXTRACTION_REVISION_SYSTEM = """You are a sales and marketing campaign strategist.
+The user's LATEST message revises or replaces earlier campaign details.
+Return ONLY valid JSON with these keys (use null for fields not changed in the latest message):
+campaign_name, business_goal, product_info, audience, tone, cta, landing_page, product_image
+
+Rules:
+- Use ONLY the latest user message for changes — do NOT keep outdated products (e.g. AirPure) if the user switched campaigns.
+- Non-null values REPLACE previous campaign data for that field.
+- landing_page is the website URL only; product_image is the email/poster image URL only.
+Do not include markdown or explanation."""
+
+_QUESTION_SYSTEM = """You are a sales and marketing campaign strategist helping plan an email campaign.
+Ask exactly ONE natural, conversational follow-up question — the single most important missing detail next.
+Never ask multiple questions in one message.
+Do not repeat information the user already provided.
+Keep the reply concise (one or two short sentences)."""
+
+
+def _parse_json_object(text: str) -> dict[str, object]:
+    cleaned = text.strip()
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", cleaned, re.IGNORECASE)
+    if fence:
+        try:
+            parsed = json.loads(fence.group(1).strip())
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    brace = re.search(r"\{[\s\S]*\}", cleaned)
+    if brace:
+        try:
+            parsed = json.loads(brace.group(0))
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    return {}
+
+
+def _validate_campaign_payload(raw: dict[str, object]) -> CampaignData:
+    normalized: dict[str, str | None] = {}
+    for field in CampaignData.model_fields:
+        value = raw.get(field)
+        if value is None:
+            normalized[field] = None
+        elif isinstance(value, str):
+            stripped = value.strip()
+            normalized[field] = stripped or None
+        else:
+            normalized[field] = str(value).strip() or None
+    try:
+        return CampaignData.model_validate(normalized)
+    except Exception:
+        return CampaignData()
+
+
+class GroqProvider(LLMProvider):
+    def __init__(self, api_key: str, model: str) -> None:
+        self._client = AsyncGroq(api_key=api_key)
+        self._model = model
+
+    async def generate(self, system_prompt: str, user_prompt: str) -> str:
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.7,
+            )
+        except GroqError as exc:
+            raise LLMProviderError(f"Groq request failed: {exc}") from exc
+
+        content = response.choices[0].message.content
+        if not content or not content.strip():
+            raise LLMProviderError("Groq returned an empty response")
+        return content.strip()
+
+    async def extract_campaign_data(
+        self,
+        messages: list[dict[str, str]],
+        current: CampaignData,
+        *,
+        revision: bool = False,
+    ) -> CampaignData:
+        latest_user = ""
+        for message in reversed(messages):
+            if message.get("role") == "user":
+                latest_user = message.get("content", "").strip()
+                break
+
+        if revision and latest_user:
+            system = _EXTRACTION_REVISION_SYSTEM
+            user_prompt = (
+                f"Current campaign (may be outdated):\n{current.filled_summary()}\n\n"
+                f"LATEST USER MESSAGE:\n{latest_user}\n\n"
+                "Return updated fields from the latest message only."
+            )
+        else:
+            system = _EXTRACTION_SYSTEM
+            history = "\n".join(
+                f"{m.get('role', 'user').upper()}: {m.get('content', '')}" for m in messages[-20:]
+            )
+            user_prompt = (
+                f"Known campaign data:\n{current.filled_summary()}\n\n"
+                f"Conversation:\n{history}\n\n"
+                "Update extraction from the conversation. Prefer the most recent user intent."
+            )
+
+        try:
+            raw_text = await self.generate(system, user_prompt)
+        except LLMProviderError:
+            return current
+
+        extracted = _validate_campaign_payload(_parse_json_object(raw_text))
+        return current.merge(extracted, revision=revision)
+
+
+def get_groq_provider() -> GroqProvider:
+    if not settings.groq_api_key:
+        raise LLMProviderError("GROQ_API_KEY is not configured")
+    return GroqProvider(api_key=settings.groq_api_key, model=settings.groq_model)
