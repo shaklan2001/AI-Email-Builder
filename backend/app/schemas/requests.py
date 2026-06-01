@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -46,13 +46,23 @@ class WorkflowStepData(BaseModel):
     type: str
     name: str | None = None
     days: int | None = None
+    value: int | None = None
+    unit: str | None = None
     condition: str | None = None
     branch: str | None = None
     email: GeneratedEmailData | None = None
 
 
+class FollowUpDelayData(BaseModel):
+    value: int = Field(..., ge=1)
+    unit: str
+
+    model_config = {"populate_by_name": True}
+
+
 class WorkflowDefinitionData(BaseModel):
     workflow_type: str | None = Field(default=None, alias="workflowType")
+    follow_up_delay: FollowUpDelayData | None = Field(default=None, alias="followUpDelay")
     steps: list[WorkflowStepData] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
@@ -60,15 +70,15 @@ class WorkflowDefinitionData(BaseModel):
 
 class CampaignBriefFieldData(BaseModel):
     campaign_name: str | None = Field(default=None, alias="campaignName")
-    business_goal: str | None = Field(default=None, alias="businessGoal")
-    audience: str | None = None
     product_info: str | None = Field(default=None, alias="productInfo")
-    tone: str | None = None
+    audience: str | None = None
     cta: str | None = None
-    attachments: str | None = None
+    tone: str | None = None
     landing_page: str | None = Field(default=None, alias="landingPage")
-    follow_up_strategy: str | None = Field(default=None, alias="followUpStrategy")
-    reply_strategy: str | None = Field(default=None, alias="replyStrategy")
+    image_url: str | None = Field(default=None, alias="imageUrl")
+    follow_up_delay: str | None = Field(default=None, alias="followUpDelay")
+    reply_handling: str | None = Field(default=None, alias="replyHandling")
+    tools_available: list[str] = Field(default_factory=list, alias="toolsAvailable")
 
     model_config = {"populate_by_name": True}
 
@@ -104,6 +114,11 @@ class WorkflowSessionData(BaseModel):
     brief_status: str | None = Field(default=None, alias="briefStatus")
     workflow: WorkflowDefinitionData | None = None
     generated_emails: list[GeneratedEmailData] = Field(default_factory=list, alias="generatedEmails")
+    recipients: list[RecipientItemData] = Field(default_factory=list)
+    recipient_counts: RecipientCountsData = Field(
+        default_factory=lambda: RecipientCountsData(validCount=0, invalidCount=0),
+        alias="recipientCounts",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -117,14 +132,91 @@ class WorkflowData(BaseModel):
     id: str
     name: str
     status: str
+    active_version: int | None = Field(default=None, alias="activeVersion")
+    activated_at: str | None = Field(default=None, alias="activatedAt")
     created_at: str
+
+    model_config = {"populate_by_name": True}
+
+
+class ActivateWorkflowData(BaseModel):
+    workflow_id: str = Field(..., alias="workflowId")
+    status: str
+    active_version: int = Field(..., alias="activeVersion")
+    activated_at: str = Field(..., alias="activatedAt")
+    executions_created: int = Field(..., alias="executionsCreated")
+    runs_queued: int = Field(..., alias="runsQueued")
+    message: str
+
+    model_config = {"populate_by_name": True}
+
+
+class UpdateWorkflowStatusRequest(BaseModel):
+    status: Literal["active", "paused"]
+
+    model_config = {"populate_by_name": True}
+
+
+class RequeueWorkflowRunsData(BaseModel):
+    workflow_id: str = Field(..., alias="workflowId")
+    runs_enqueued: int = Field(..., alias="runsEnqueued")
+    message: str
+
+    model_config = {"populate_by_name": True}
+
+
+class DeleteWorkflowData(BaseModel):
+    workflow_id: str = Field(..., alias="workflowId")
+    message: str
+
+    model_config = {"populate_by_name": True}
+
+
+class UpdateWorkflowStatusData(BaseModel):
+    id: str
+    name: str
+    status: str
+    active_version: int | None = Field(default=None, alias="activeVersion")
+    activated_at: str | None = Field(default=None, alias="activatedAt")
+    created_at: str = Field(..., alias="createdAt")
+    runs_enqueued: int = Field(default=0, alias="runsEnqueued")
+
+    model_config = {"populate_by_name": True}
+
+
+class RecipientItemData(BaseModel):
+    email: str
+
+
+class RecipientCountsData(BaseModel):
+    valid_count: int = Field(..., alias="validCount")
+    invalid_count: int = Field(default=0, alias="invalidCount")
+
+    model_config = {"populate_by_name": True}
+
+
+class RecipientListData(BaseModel):
+    recipients: list[RecipientItemData] = Field(default_factory=list)
+    valid_count: int = Field(..., alias="validCount")
+    invalid_count: int = Field(default=0, alias="invalidCount")
+
+    model_config = {"populate_by_name": True}
+
+
+class AddRecipientsRequest(BaseModel):
+    emails: list[str] = Field(..., min_length=1)
+
+    model_config = {"populate_by_name": True}
 
 
 class RecipientUploadData(BaseModel):
-    valid_count: int
-    invalid_count: int
-    valid_emails: list[str]
-    invalid_rows: list[dict[str, str]]
+    valid_count: int = Field(..., alias="validCount")
+    invalid_count: int = Field(..., alias="invalidCount")
+    valid_emails: list[str] = Field(default_factory=list, alias="validEmails")
+    invalid_rows: list[dict[str, str]] = Field(default_factory=list, alias="invalidRows")
+    recipients: list[RecipientItemData] = Field(default_factory=list)
+
+    model_config = {"populate_by_name": True}
 
 
 class ReviewRequest(BaseModel):
@@ -132,10 +224,18 @@ class ReviewRequest(BaseModel):
 
 
 class ReviewData(BaseModel):
-    workflow_summary: dict[str, Any]
-    email_summary: dict[str, Any]
-    recipient_count: int
-    schedule_summary: dict[str, Any]
+    workflow_summary: dict[str, Any] = Field(alias="workflowSummary")
+    email_summary: dict[str, Any] = Field(alias="emailSummary")
+    recipient_count: int = Field(alias="recipientCount")
+    schedule_summary: dict[str, Any] = Field(alias="scheduleSummary")
+    review_status: str = Field(default="pending", alias="reviewStatus")
+    activation_allowed: bool = Field(default=False, alias="activationAllowed")
+    lead_status_counts: dict[str, int] = Field(
+        default_factory=dict,
+        alias="leadStatusCounts",
+    )
+
+    model_config = {"populate_by_name": True}
 
 
 class SendEmailRequest(BaseModel):
@@ -147,5 +247,27 @@ class SendEmailRequest(BaseModel):
 class EmailSendStatusData(BaseModel):
     status: str
     message_id: str | None = None
-    recipient_count: int
-    step_id: str | None = None
+    message_ids: list[str] = Field(default_factory=list, alias="messageIds")
+    recipient_count: int = Field(..., alias="recipientCount")
+    step_id: str | None = Field(default=None, alias="stepId")
+
+    model_config = {"populate_by_name": True}
+
+
+class WebhookProcessData(BaseModel):
+    status: str
+    event_type: str | None = None
+    duplicate: bool = False
+    workflow_updated: bool = Field(default=False, alias="workflowUpdated")
+
+    model_config = {"populate_by_name": True}
+
+
+class AnalyticsData(BaseModel):
+    sent: int = 0
+    delivered: int = 0
+    opened: int = 0
+    clicked: int = 0
+    replied: int = 0
+    failed: int = 0
+    bounced: int = 0
