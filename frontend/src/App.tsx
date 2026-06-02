@@ -24,6 +24,10 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/campaigns/new" element={<NewWorkflowPage />} />
+            <Route path="/campaigns/:workflowId/review" element={<WorkflowReviewPage />} />
+            <Route path="/campaigns/:workflowId" element={<WorkflowBuilderPage />} />
+            {/* Legacy /workflows paths (same screens) */}
             <Route path="/workflows/new" element={<NewWorkflowPage />} />
             <Route path="/workflows/:workflowId/review" element={<WorkflowReviewPage />} />
             <Route path="/workflows/:workflowId" element={<WorkflowBuilderPage />} />

@@ -3,14 +3,23 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import type { ReactNode } from "react";
-import type { WorkflowReviewData } from "../../types/workflow-review";
+import { LeadDetailsList } from "../leads/lead-details";
+import { LEAD_STATUSES, leadStatusLabels } from "../../types/lead-status";
+import type { LeadStatusCounts, WorkflowReviewData } from "../../types/workflow-review";
 
 interface WorkflowReviewProps {
   data: WorkflowReviewData;
+  onLooksGood?: () => void;
+  onEditCampaign?: () => void;
+  onRegenerate?: () => void;
+  onActivate?: () => void;
+  actionsDisabled?: boolean;
+  approveLoading?: boolean;
 }
 
 function ReviewSection({
@@ -32,8 +41,26 @@ function ReviewSection({
   );
 }
 
-export function WorkflowReview({ data }: WorkflowReviewProps) {
-  const { workflowSummary, emailSummary, recipientCount, scheduleSummary } = data;
+export function WorkflowReview({
+  data,
+  onLooksGood,
+  onEditCampaign,
+  onRegenerate,
+  onActivate,
+  actionsDisabled = false,
+  approveLoading = false,
+}: WorkflowReviewProps) {
+  const {
+    workflowSummary,
+    emailSummary,
+    recipientCount,
+    scheduleSummary,
+    leadStatusCounts,
+    leadDetails = [],
+  } = data;
+  const statusCounts: LeadStatusCounts | null = leadStatusCounts ?? null;
+  const showLeadStatus = statusCounts !== null && Object.keys(statusCounts).length > 0;
+  const approved = data.reviewStatus === "approved";
 
   return (
     <Stack spacing={3}>
@@ -99,15 +126,81 @@ export function WorkflowReview({ data }: WorkflowReviewProps) {
         </Stack>
       </ReviewSection>
 
+      {showLeadStatus && statusCounts && (
+        <ReviewSection title="Lead Status">
+          <Stack
+            direction="row"
+            flexWrap="wrap"
+            gap={1}
+            aria-label="Lead lifecycle status counts"
+          >
+            {LEAD_STATUSES.map((status) => (
+              <Chip
+                key={status}
+                label={`${leadStatusLabels[status]}: ${(statusCounts[status] ?? 0).toLocaleString()}`}
+                size="small"
+                variant="outlined"
+              />
+            ))}
+          </Stack>
+        </ReviewSection>
+      )}
+
+      {leadDetails.length > 0 && (
+        <ReviewSection title="Lead Details">
+          <LeadDetailsList leads={leadDetails} />
+        </ReviewSection>
+      )}
+
       <Box sx={{ pt: 1 }}>
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<CheckCircleOutlineIcon />}
-          fullWidth
-        >
-          Approve Workflow
-        </Button>
+        <Stack spacing={1.5}>
+          {approved && (
+            <Typography variant="body2" color="success.main">
+              Workflow approved — activation is unlocked.
+            </Typography>
+          )}
+          <Button
+            variant="contained"
+            size="large"
+            startIcon={<CheckCircleOutlineIcon />}
+            fullWidth
+            onClick={onLooksGood}
+            disabled={actionsDisabled || approved || approveLoading}
+          >
+            {approveLoading ? "Approving…" : "Looks Good"}
+          </Button>
+          {onEditCampaign && (
+            <Button
+              variant="outlined"
+              fullWidth
+              onClick={onEditCampaign}
+              disabled={actionsDisabled || approveLoading}
+            >
+              Edit Campaign
+            </Button>
+          )}
+          {onRegenerate && (
+            <Button
+              variant="outlined"
+              fullWidth
+              onClick={onRegenerate}
+              disabled={actionsDisabled || approveLoading}
+            >
+              Regenerate Workflow
+            </Button>
+          )}
+          {onActivate && data.activationAllowed && (
+            <Button
+              variant="contained"
+              color="secondary"
+              fullWidth
+              onClick={onActivate}
+              disabled={actionsDisabled}
+            >
+              Activate Workflow
+            </Button>
+          )}
+        </Stack>
       </Box>
     </Stack>
   );

@@ -1,4 +1,18 @@
-import type { WorkflowReviewData } from "../types/workflow-review";
+import { mockLeadDetails } from "./lead-details";
+import type { LeadStatusCounts, WorkflowReviewData } from "../types/workflow-review";
+
+const mockLeadStatusCounts: LeadStatusCounts = {
+  NEW: 24,
+  EMAIL_SENT: 38,
+  OPENED: 22,
+  CLICKED: 9,
+  REPLIED: 12,
+  INTERESTED: 6,
+  DEMO_BOOKED: 3,
+  NOT_INTERESTED: 5,
+  UNSUBSCRIBED: 2,
+  CLOSED: 7,
+};
 
 export const mockWorkflowReview: WorkflowReviewData = {
   workflowSummary: {
@@ -23,6 +37,8 @@ export const mockWorkflowReview: WorkflowReviewData = {
     timezone: "America/New_York (EST)",
     sendWindow: "Weekdays, 9:00 AM – 5:00 PM",
   },
+  leadStatusCounts: mockLeadStatusCounts,
+  leadDetails: mockLeadDetails,
 };
 
 export function getMockWorkflowReview(_workflowId: string): WorkflowReviewData {

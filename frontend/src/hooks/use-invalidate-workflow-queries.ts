@@ -8,6 +8,7 @@ export function useInvalidateWorkflowQueries() {
   return useCallback(
     (workflowId: string) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.workflow(workflowId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatThread(workflowId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.workflowSession(workflowId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.campaignBrief(workflowId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.workflowPreview(workflowId) });

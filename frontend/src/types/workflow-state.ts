@@ -9,9 +9,9 @@ export interface WorkflowState {
 
 export const defaultWorkflowState: WorkflowState = {
   initialEmailLabel: "Send Initial Email",
-  waitLabel: "Wait 3 Days",
+  waitLabel: "Wait",
   conditionLabel: "Reply?",
-  yesBranchLabel: "Demo Call",
+  yesBranchLabel: "AI Reply Agent",
   noBranchLabel: "Follow Up Email",
   extraSteps: [],
 };

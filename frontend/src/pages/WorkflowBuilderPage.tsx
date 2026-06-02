@@ -8,9 +8,9 @@ import { AiPromptScreen } from "../components/builder/ai-prompt-screen";
 import { BuilderLayout } from "../components/builder/BuilderLayout";
 import type { ChatMessage } from "../components/chat/types";
 import { useInvalidateWorkflowQueries } from "../hooks/use-invalidate-workflow-queries";
+import { useChatThread } from "../hooks/use-chat-thread";
 import { useWorkflowSession } from "../hooks/use-workflow-session";
 import { buildBuilderBoot, type BuilderBootState } from "../lib/builder-boot";
-import { loadWorkflowDraft } from "../lib/workflow-persistence";
 import type { BuilderStage, CampaignMetadata } from "../types/workflow-draft";
 
 const TRANSITION_MS = 400;
@@ -58,27 +58,23 @@ export function WorkflowBuilderPage() {
   );
   const invalidateWorkflowQueries = useInvalidateWorkflowQueries();
 
-  const hasLocalDraft = Boolean(
-    workflowId && workflowId !== "new" && loadWorkflowDraft(workflowId),
-  );
-
-  const { data: session, isFetched: sessionFetched } = useWorkflowSession(
+  const { data: chatThread, isFetched: chatThreadFetched } = useChatThread(workflowId);
+  const { data: session } = useWorkflowSession(
     workflowId,
-    !hasLocalDraft,
+    chatThreadFetched && !chatThread,
   );
-
-  const sessionReady = hasLocalDraft || sessionFetched;
 
   const boot = useMemo(() => {
-    if (!workflowId || workflowId === "new" || !sessionReady) {
+    if (!workflowId || workflowId === "new" || !chatThreadFetched) {
       return null;
     }
     return buildBuilderBoot(
       workflowId,
       { startAtPrompt },
-      hasLocalDraft ? null : session ?? null,
+      session ?? null,
+      chatThread ?? null,
     );
-  }, [workflowId, startAtPrompt, session, hasLocalDraft, sessionReady]);
+  }, [workflowId, startAtPrompt, session, chatThread, chatThreadFetched]);
 
   const [stage, setStage] = useState<BuilderStage>(() => boot?.stage ?? "builder");
   const [firstPrompt, setFirstPrompt] = useState<string | null>(
@@ -159,7 +155,7 @@ export function WorkflowBuilderPage() {
     );
   }
 
-  if (!sessionReady) {
+  if (!chatThreadFetched) {
     return (
       <Box
         sx={{
@@ -219,6 +215,8 @@ export function WorkflowBuilderPage() {
             initialWorkflowDefinition={boot.initialWorkflowDefinition ?? null}
             initialCampaignBrief={boot.initialCampaignBrief ?? null}
             initialBriefStatus={boot.initialBriefStatus ?? null}
+            initialReviewStatus={boot.initialReviewStatus ?? null}
+            initialActivationAllowed={boot.initialActivationAllowed}
             campaign={campaign}
             onCampaignChange={handleCampaignChange}
             onDraftCleared={handleDraftCleared}

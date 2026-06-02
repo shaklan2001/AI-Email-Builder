@@ -1,15 +1,17 @@
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
 import Container from "@mui/material/Container";
 import Grid from "@mui/material/Grid2";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { CreateWorkflowButton } from "../components/dashboard/CreateWorkflowButton";
 import { DashboardEmptyState } from "../components/dashboard/DashboardEmptyState";
-import { WorkflowCard } from "../components/dashboard/WorkflowCard";
-import { mockWorkflows } from "../mocks/workflows";
+import { WorkflowCardWithAnalytics } from "../components/dashboard/WorkflowCardWithAnalytics";
+import { useWorkflows } from "../hooks/use-workflows";
 
 export function DashboardPage() {
-  const workflows = mockWorkflows;
+  const { data: workflows = [], isLoading, isError, error } = useWorkflows();
   const hasWorkflows = workflows.length > 0;
 
   return (
@@ -26,19 +28,27 @@ export function DashboardPage() {
               Dashboard
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Manage your email workflows in one place.
+              Manage your AI outreach campaigns in one place.
             </Typography>
           </Box>
 
           {hasWorkflows && <CreateWorkflowButton />}
         </Stack>
 
-        <Box component="section" aria-label="Workflow list">
-          {hasWorkflows ? (
+        <Box component="section" aria-label="Campaign list">
+          {isLoading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
+              <CircularProgress size={32} aria-label="Loading campaigns" />
+            </Box>
+          ) : isError ? (
+            <Alert severity="error">
+              {error instanceof Error ? error.message : "Failed to load campaigns."}
+            </Alert>
+          ) : hasWorkflows ? (
             <Grid container spacing={3}>
               {workflows.map((workflow) => (
                 <Grid key={workflow.id} size={{ xs: 12, sm: 6, md: 4 }}>
-                  <WorkflowCard workflow={workflow} />
+                  <WorkflowCardWithAnalytics workflow={workflow} />
                 </Grid>
               ))}
             </Grid>

@@ -1,12 +1,16 @@
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { queryKeys } from "../api/queryKeys";
+import { campaignBuilderPath } from "../lib/campaign-routes";
 import { createWorkflow } from "../services/workflow.service";
 
 export function NewWorkflowPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const started = useRef(false);
 
   useEffect(() => {
@@ -18,7 +22,8 @@ export function NewWorkflowPage() {
     void (async () => {
       try {
         const workflow = await createWorkflow();
-        navigate(`/workflows/${workflow.id}`, {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.workflows });
+        navigate(campaignBuilderPath(workflow.id), {
           replace: true,
           state: { isNew: true },
         });
@@ -26,7 +31,7 @@ export function NewWorkflowPage() {
         navigate("/dashboard", { replace: true });
       }
     })();
-  }, [navigate]);
+  }, [navigate, queryClient]);
 
   return (
     <Box
@@ -41,7 +46,7 @@ export function NewWorkflowPage() {
     >
       <CircularProgress size={32} />
       <Typography variant="body2" color="text.secondary">
-        Creating workflow…
+        Creating campaign…
       </Typography>
     </Box>
   );

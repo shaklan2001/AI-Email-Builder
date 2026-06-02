@@ -3,7 +3,16 @@ export type WorkflowType =
   | "conditional"
   | "multi_level_conditional";
 
-export type WorkflowStepType = "send_email" | "wait" | "condition" | "end";
+import type { FollowUpDelay } from "./follow-up-delay";
+
+export type WorkflowStepType =
+  | "send_email"
+  | "wait"
+  | "reply_condition"
+  | "interested_branch"
+  | "no_reply_branch"
+  | "condition"
+  | "end";
 
 export interface EmailBodyVersion {
   subject: string;
@@ -22,6 +31,8 @@ export interface WorkflowStep {
   type: WorkflowStepType;
   name?: string;
   days?: number;
+  value?: number;
+  unit?: "hours" | "days" | "weeks";
   condition?: string;
   branch?: "yes" | "no";
   email?: GeneratedEmail;
@@ -29,5 +40,6 @@ export interface WorkflowStep {
 
 export interface WorkflowDefinition {
   workflowType?: WorkflowType;
+  followUpDelay?: FollowUpDelay;
   steps: WorkflowStep[];
 }

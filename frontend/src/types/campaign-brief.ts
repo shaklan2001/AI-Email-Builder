@@ -1,14 +1,21 @@
 export interface CampaignBrief {
   campaignName?: string | null;
-  businessGoal?: string | null;
-  audience?: string | null;
   productInfo?: string | null;
-  tone?: string | null;
+  audience?: string | null;
   cta?: string | null;
-  attachments?: string | null;
+  tone?: string | null;
   landingPage?: string | null;
-  followUpStrategy?: string | null;
-  replyStrategy?: string | null;
+  imageUrl?: string | null;
+  emailLength?: string | null;
+  followUpEnabled?: string | null;
+  followUpDelay?: string | null;
+  replyHandling?: string | null;
+  toolsAvailable?: string[];
 }
 
 export type BriefStatus = "pending_approval" | "approved" | "editing" | null;
+
+export const DEFAULT_TOOLS_AVAILABLE = [
+  "Company Information",
+  "Demo Booking",
+] as const;
