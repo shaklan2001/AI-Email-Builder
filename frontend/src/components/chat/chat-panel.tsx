@@ -22,6 +22,7 @@ import { useSendChatMessage } from "../../hooks/use-send-chat-message";
 import { ChatInput } from "./chat-input";
 import { MessageList } from "./message-list";
 import type { BriefStatus, CampaignBrief } from "../../types/campaign-brief";
+import type { ReviewStatus } from "../../types/workflow-review";
 import type { WorkflowDefinition } from "../../types/workflow-definition";
 import type { ChatMessage } from "./types";
 
@@ -39,6 +40,7 @@ interface ChatPanelProps {
   onMessagesChange: Dispatch<SetStateAction<ChatMessage[]>>;
   onWorkflowChange?: (workflow: WorkflowDefinition | null) => void;
   onCampaignBriefChange?: (brief: CampaignBrief | null, status: BriefStatus) => void;
+  onReviewStateChange?: (status: ReviewStatus, activationAllowed: boolean) => void;
   onBriefActionReady?: (sendAction: (message: string) => void) => void;
   onChatPendingChange?: (pending: boolean) => void;
 }
@@ -49,6 +51,7 @@ export function ChatPanel({
   onMessagesChange,
   onWorkflowChange,
   onCampaignBriefChange,
+  onReviewStateChange,
   onBriefActionReady,
   onChatPendingChange,
 }: ChatPanelProps) {
@@ -61,9 +64,11 @@ export function ChatPanel({
   const applyAssistantResponse = useCallback(
     (data: {
       message: string;
-      workflow: WorkflowDefinition | null;
+      workflowPreview: WorkflowDefinition | null;
       campaignBrief: CampaignBrief | null;
       briefStatus: BriefStatus;
+      reviewStatus: ReviewStatus;
+      activationAllowed: boolean;
     }) => {
       const assistantMessage: ChatMessage = {
         id: createMessageId(),
@@ -71,12 +76,13 @@ export function ChatPanel({
         content: data.message,
       };
       onMessagesChange((prev) => [...withoutLoadingMessages(prev), assistantMessage]);
-      if (data.workflow) {
-        onWorkflowChange?.(data.workflow);
+      if (data.workflowPreview) {
+        onWorkflowChange?.(data.workflowPreview);
       }
       onCampaignBriefChange?.(data.campaignBrief, data.briefStatus);
+      onReviewStateChange?.(data.reviewStatus, data.activationAllowed);
     },
-    [onCampaignBriefChange, onMessagesChange, onWorkflowChange],
+    [onCampaignBriefChange, onMessagesChange, onReviewStateChange, onWorkflowChange],
   );
 
   const sendToApi = useCallback(
@@ -96,7 +102,7 @@ export function ChatPanel({
       onMessagesChange((prev) => [...withoutLoadingMessages(prev), loadingMessage]);
 
       try {
-        const data = await mutateAsync({ message, workflowId });
+        const data = await mutateAsync({ message, threadId: workflowId });
         applyAssistantResponse(data);
         invalidateWorkflowQueries(workflowId);
       } catch {

@@ -42,10 +42,10 @@ export function AiPromptScreen({ onSubmit }: AiPromptScreenProps) {
       >
         <Stack spacing={1.5} alignItems="center">
           <Typography variant="h4" component="h1" fontWeight={600}>
-            Build Your Email Workflow
+            Build Your Outreach Campaign
           </Typography>
           <Typography variant="body1" color="text.secondary" maxWidth={480}>
-            Describe your campaign and AI will build the workflow with you.
+            Describe your product and audience — the AI agent will build emails and workflow for you.
           </Typography>
         </Stack>
 
@@ -80,7 +80,7 @@ export function AiPromptScreen({ onSubmit }: AiPromptScreenProps) {
             disabled={!canSubmit}
             sx={{ alignSelf: "center", minWidth: 200, px: 4 }}
           >
-            Build Workflow
+            Start Campaign
           </Button>
         </Stack>
       </Stack>

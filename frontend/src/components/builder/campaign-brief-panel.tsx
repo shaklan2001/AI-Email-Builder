@@ -1,3 +1,4 @@
+import CheckIcon from "@mui/icons-material/Check";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Divider from "@mui/material/Divider";
@@ -5,6 +6,7 @@ import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import type { CampaignBrief } from "../../types/campaign-brief";
+import { DEFAULT_TOOLS_AVAILABLE } from "../../types/campaign-brief";
 
 const LOOKS_GOOD_MESSAGE = "Looks Good";
 const EDIT_DETAILS_MESSAGE = "Edit Campaign Details";
@@ -29,6 +31,14 @@ function displayValue(value: string | null | undefined): string {
   return "Not provided";
 }
 
+function resolveTools(brief: CampaignBrief): string[] {
+  const tools = brief.toolsAvailable;
+  if (tools && tools.length > 0) {
+    return tools;
+  }
+  return [...DEFAULT_TOOLS_AVAILABLE];
+}
+
 interface CampaignBriefPanelProps {
   brief: CampaignBrief;
   onApprove: () => void;
@@ -42,6 +52,8 @@ export function CampaignBriefPanel({
   onEdit,
   actionsDisabled = false,
 }: CampaignBriefPanelProps) {
+  const tools = resolveTools(brief);
+
   return (
     <Box
       sx={{
@@ -61,25 +73,41 @@ export function CampaignBriefPanel({
       <Paper variant="outlined" sx={{ p: 2.5, flex: 1 }}>
         <Stack spacing={2}>
           <BriefField label="Campaign Name" value={displayValue(brief.campaignName)} />
-          <BriefField label="Business Goal" value={displayValue(brief.businessGoal)} />
-          <BriefField label="Target Audience" value={displayValue(brief.audience)} />
-          <BriefField
-            label="Product / Service"
-            value={displayValue(brief.productInfo)}
-          />
-          <BriefField label="Tone" value={displayValue(brief.tone)} />
+          <BriefField label="Product" value={displayValue(brief.productInfo)} />
+          <BriefField label="Audience" value={displayValue(brief.audience)} />
           <BriefField label="CTA" value={displayValue(brief.cta)} />
-          <BriefField label="Attachments" value={displayValue(brief.attachments)} />
+          <BriefField label="Tone" value={displayValue(brief.tone)} />
           <BriefField label="Landing Page" value={displayValue(brief.landingPage)} />
+          <BriefField label="Image URL" value={displayValue(brief.imageUrl)} />
+          <BriefField label="Email Length" value={displayValue(brief.emailLength)} />
+          <BriefField
+            label="Follow-Up Email"
+            value={displayValue(brief.followUpEnabled)}
+          />
+          <BriefField
+            label="Follow-Up Delay"
+            value={displayValue(brief.followUpDelay)}
+          />
+          <BriefField
+            label="Reply Handling"
+            value={displayValue(brief.replyHandling)}
+          />
 
           <Divider />
 
-          <Typography variant="subtitle2">Workflow Strategy</Typography>
-          <BriefField
-            label="Follow-Up Strategy"
-            value={displayValue(brief.followUpStrategy)}
-          />
-          <BriefField label="Reply Strategy" value={displayValue(brief.replyStrategy)} />
+          <Box>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Tools Available
+            </Typography>
+            <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+              {tools.map((tool) => (
+                <Stack key={tool} direction="row" spacing={0.75} alignItems="center">
+                  <CheckIcon sx={{ fontSize: 16, color: "success.main" }} />
+                  <Typography variant="body2">{tool}</Typography>
+                </Stack>
+              ))}
+            </Stack>
+          </Box>
         </Stack>
       </Paper>
 

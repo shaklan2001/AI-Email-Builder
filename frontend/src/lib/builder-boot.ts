@@ -2,10 +2,12 @@ import type { ChatMessage } from "../components/chat/types";
 import { setStoredRecipients } from "../mocks/recipient-storage";
 import {
   createEmptyCampaignMetadata,
-  loadWorkflowDraft,
+  loadRecipientDraft,
 } from "./workflow-persistence";
+import type { ChatThreadPayload } from "../services/chat.service";
 import type { WorkflowSession } from "../services/workflow.service";
 import type { BriefStatus, CampaignBrief } from "../types/campaign-brief";
+import type { ReviewStatus } from "../types/workflow-review";
 import type { BuilderStage, CampaignMetadata } from "../types/workflow-draft";
 import type { WorkflowDefinition } from "../types/workflow-definition";
 
@@ -18,28 +20,103 @@ export interface BuilderBootState {
   initialWorkflowDefinition: WorkflowDefinition | null;
   initialCampaignBrief: CampaignBrief | null;
   initialBriefStatus: BriefStatus;
+  initialReviewStatus: ReviewStatus;
+  initialActivationAllowed: boolean;
   campaign: CampaignMetadata;
   layoutKey: number;
 }
 
-function messagesFromSession(
-  session: WorkflowSession,
+function messagesFromRows(
+  rows: Array<{ role: string; content: string }>,
+  idPrefix: string,
 ): ChatMessage[] | undefined {
-  const rows = session.messages;
   if (rows.length === 0) {
     return undefined;
   }
   return rows.map((m, index) => ({
-    id: `session-${index}-${m.role}`,
+    id: `${idPrefix}-${index}-${m.role}`,
     role: m.role as "user" | "assistant",
     content: m.content,
   }));
 }
 
+function messagesFromSession(
+  session: WorkflowSession,
+): ChatMessage[] | undefined {
+  return messagesFromRows(session.messages, "session");
+}
+
+function messagesFromChatThread(
+  thread: ChatThreadPayload,
+): ChatMessage[] | undefined {
+  return messagesFromRows(thread.messages, "thread");
+}
+
+function bootFromChatThread(
+  thread: ChatThreadPayload,
+  startAtPrompt: boolean,
+): BuilderBootState {
+  const messages = messagesFromChatThread(thread);
+  const hasConversation = Boolean(messages && messages.length > 0);
+  const firstUser = messages?.find((m) => m.role === "user");
+  const inBuilder =
+    hasConversation || Boolean(thread.workflowPreview?.steps?.length);
+
+  if (startAtPrompt && !inBuilder) {
+    const campaign = createEmptyCampaignMetadata(true);
+    return {
+      stage: "prompt",
+      firstPrompt: null,
+      showPrompt: true,
+      showBuilder: false,
+      initialMessages: undefined,
+      initialWorkflowDefinition: null,
+      initialCampaignBrief: null,
+      initialBriefStatus: null,
+      initialReviewStatus: null,
+      initialActivationAllowed: false,
+      campaign,
+      layoutKey: 0,
+    };
+  }
+
+  return {
+    stage: "builder",
+    firstPrompt: firstUser?.content ?? null,
+    showPrompt: false,
+    showBuilder: true,
+    initialMessages: messages,
+    initialWorkflowDefinition: thread.workflowPreview,
+    initialCampaignBrief: thread.campaignBrief,
+    initialBriefStatus: thread.briefStatus,
+    initialReviewStatus: thread.reviewStatus,
+    initialActivationAllowed: thread.activationAllowed,
+    campaign: {
+      firstPrompt: firstUser?.content ?? null,
+      builderStage: "builder",
+    },
+    layoutKey: 0,
+  };
+}
+
+function hydrateRecipientsFromSession(session: WorkflowSession, workflowId: string): void {
+  const items = session.recipients ?? [];
+  const counts = session.recipientCounts;
+  if (items.length > 0 || (counts && counts.validCount > 0)) {
+    setStoredRecipients(
+      workflowId,
+      items,
+      counts?.invalidCount ?? 0,
+    );
+  }
+}
+
 function bootFromSession(
   session: WorkflowSession,
   startAtPrompt: boolean,
+  workflowId: string,
 ): BuilderBootState {
+  hydrateRecipientsFromSession(session, workflowId);
   const messages = messagesFromSession(session);
   const hasConversation = Boolean(messages && messages.length > 0);
   const firstUser = messages?.find((m) => m.role === "user");
@@ -56,6 +133,8 @@ function bootFromSession(
       initialWorkflowDefinition: null,
       initialCampaignBrief: null,
       initialBriefStatus: null,
+      initialReviewStatus: null,
+      initialActivationAllowed: false,
       campaign,
       layoutKey: 0,
     };
@@ -70,6 +149,8 @@ function bootFromSession(
     initialWorkflowDefinition: session.workflow,
     initialCampaignBrief: session.campaignBrief,
     initialBriefStatus: session.briefStatus,
+    initialReviewStatus: null,
+    initialActivationAllowed: false,
     campaign: {
       firstPrompt: firstUser?.content ?? null,
       builderStage: "builder",
@@ -78,11 +159,8 @@ function bootFromSession(
   };
 }
 
-function bootFromDraft(
-  workflowId: string,
-  isNewRoute: boolean,
-): BuilderBootState | null {
-  const draft = loadWorkflowDraft(workflowId);
+function bootFromDraft(workflowId: string): BuilderBootState | null {
+  const draft = loadRecipientDraft(workflowId);
   if (!draft) {
     return null;
   }
@@ -93,35 +171,42 @@ function bootFromDraft(
     draft.invalidRecipientCount,
   );
 
-  const stage = draft.campaign.builderStage;
-  const inBuilder = stage === "builder";
+  return null;
+}
 
-  return {
-    stage,
-    firstPrompt: draft.campaign.firstPrompt,
-    showPrompt: isNewRoute && !inBuilder,
-    showBuilder: !isNewRoute || inBuilder,
-    initialMessages: draft.messages,
-    initialWorkflowDefinition: draft.workflowDefinition ?? null,
-    initialCampaignBrief: draft.campaignBrief ?? null,
-    initialBriefStatus: draft.briefStatus ?? null,
-    campaign: draft.campaign,
-    layoutKey: 0,
-  };
+/** Restore recipient counts from local draft only; conversation state comes from the API. */
+function hydrateRecipientsFromDraft(workflowId: string): void {
+  const draft = loadRecipientDraft(workflowId);
+  if (!draft) {
+    return;
+  }
+  setStoredRecipients(
+    workflowId,
+    draft.recipients,
+    draft.invalidRecipientCount,
+  );
 }
 
 export function buildBuilderBoot(
   workflowId: string,
   options: { startAtPrompt: boolean },
   session?: WorkflowSession | null,
+  chatThread?: ChatThreadPayload | null,
 ): BuilderBootState {
-  const fromDraft = bootFromDraft(workflowId, options.startAtPrompt);
-  if (fromDraft) {
-    return fromDraft;
+  hydrateRecipientsFromDraft(workflowId);
+
+  // MongoDB conversation state is the source of truth (spec 33).
+  if (chatThread) {
+    return bootFromChatThread(chatThread, options.startAtPrompt);
   }
 
   if (session) {
-    return bootFromSession(session, options.startAtPrompt);
+    return bootFromSession(session, options.startAtPrompt, workflowId);
+  }
+
+  const fromDraft = bootFromDraft(workflowId);
+  if (fromDraft) {
+    return fromDraft;
   }
 
   const campaign = createEmptyCampaignMetadata(options.startAtPrompt);
@@ -134,6 +219,8 @@ export function buildBuilderBoot(
     initialWorkflowDefinition: null,
     initialCampaignBrief: null,
     initialBriefStatus: null,
+    initialReviewStatus: null,
+    initialActivationAllowed: false,
     campaign,
     layoutKey: 0,
   };

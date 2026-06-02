@@ -1,37 +1,8 @@
 import type { ChatMessage } from "../components/chat/types";
-import type { BriefStatus, CampaignBrief } from "../types/campaign-brief";
 import type { Recipient } from "../types/recipient";
-import type {
-  CampaignMetadata,
-  WorkflowDraft,
-} from "../types/workflow-draft";
-import type { WorkflowDefinition } from "../types/workflow-definition";
-import type { WorkflowState } from "../types/workflow-state";
 
-const STORAGE_PREFIX = "workflow-draft:";
-export const WORKFLOW_DRAFT_VERSION = 1 as const;
-
-function getStorageKey(workflowId: string): string {
-  return `${STORAGE_PREFIX}${workflowId}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isValidChatMessage(value: unknown): value is ChatMessage {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return (
-    typeof value.id === "string" &&
-    (value.role === "user" || value.role === "assistant") &&
-    typeof value.content === "string" &&
-    (value.isLoading === undefined || typeof value.isLoading === "boolean") &&
-    (value.isPlaceholder === undefined || typeof value.isPlaceholder === "boolean")
-  );
-}
+const STORAGE_PREFIX = "workflow-recipients:";
+export const RECIPIENT_DRAFT_VERSION = 1 as const;
 
 /** Strip legacy placeholder rows and in-flight loading bubbles from persisted chat. */
 export function sanitizeChatMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -41,169 +12,84 @@ export function sanitizeChatMessages(messages: ChatMessage[]): ChatMessage[] {
   });
 }
 
-function isValidWorkflowDefinition(value: unknown): value is WorkflowDefinition {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  if (!Array.isArray(value.steps)) {
-    return false;
-  }
-
-  return value.steps.every((step) => {
-    if (!isRecord(step)) {
-      return false;
-    }
-    return typeof step.id === "string" && typeof step.type === "string";
-  });
+export interface RecipientDraft {
+  version: typeof RECIPIENT_DRAFT_VERSION;
+  workflowId: string;
+  recipients: Recipient[];
+  invalidRecipientCount: number;
+  updatedAt: string;
 }
 
-function isValidWorkflowState(value: unknown): value is WorkflowState {
-  if (!isRecord(value)) {
-    return false;
-  }
+function getStorageKey(workflowId: string): string {
+  return `${STORAGE_PREFIX}${workflowId}`;
+}
 
-  return (
-    typeof value.initialEmailLabel === "string" &&
-    typeof value.waitLabel === "string" &&
-    typeof value.conditionLabel === "string" &&
-    typeof value.yesBranchLabel === "string" &&
-    typeof value.noBranchLabel === "string" &&
-    Array.isArray(value.extraSteps) &&
-    value.extraSteps.every((step) => typeof step === "string")
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isValidRecipient(value: unknown): value is Recipient {
   if (!isRecord(value)) {
     return false;
   }
-
   return typeof value.id === "string" && typeof value.email === "string";
 }
 
-function isValidBriefStatus(value: unknown): value is BriefStatus {
-  return (
-    value === null ||
-    value === "pending_approval" ||
-    value === "approved" ||
-    value === "editing"
-  );
-}
-
-function isValidCampaignBrief(value: unknown): value is CampaignBrief | null {
-  if (value === null || value === undefined) {
-    return true;
-  }
-  return isRecord(value);
-}
-
-function isValidCampaignMetadata(value: unknown): value is CampaignMetadata {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const firstPrompt = value.firstPrompt;
-  const builderStage = value.builderStage;
-
-  return (
-    (firstPrompt === null || typeof firstPrompt === "string") &&
-    (builderStage === "prompt" || builderStage === "builder")
-  );
-}
-
-function isValidWorkflowDraft(data: unknown, workflowId: string): data is WorkflowDraft {
+function isValidRecipientDraft(data: unknown, workflowId: string): data is RecipientDraft {
   if (!isRecord(data)) {
     return false;
   }
-
-  if (
-    data.version !== WORKFLOW_DRAFT_VERSION ||
-    data.workflowId !== workflowId ||
-    typeof data.updatedAt !== "string" ||
-    !isValidWorkflowState(data.workflow) ||
-    (data.workflowDefinition !== undefined &&
-      data.workflowDefinition !== null &&
-      !isValidWorkflowDefinition(data.workflowDefinition)) ||
-    !Array.isArray(data.messages) ||
-    !data.messages.every(isValidChatMessage) ||
-    !isValidCampaignMetadata(data.campaign) ||
-    !Array.isArray(data.recipients) ||
-    !data.recipients.every(isValidRecipient) ||
-    typeof data.invalidRecipientCount !== "number" ||
-    data.invalidRecipientCount < 0 ||
-    !Number.isInteger(data.invalidRecipientCount) ||
-    !isValidCampaignBrief(data.campaignBrief) ||
-    !isValidBriefStatus(data.briefStatus ?? null)
-  ) {
-    return false;
-  }
-
-  return true;
+  return (
+    data.version === RECIPIENT_DRAFT_VERSION &&
+    data.workflowId === workflowId &&
+    typeof data.updatedAt === "string" &&
+    Array.isArray(data.recipients) &&
+    data.recipients.every(isValidRecipient) &&
+    typeof data.invalidRecipientCount === "number" &&
+    data.invalidRecipientCount >= 0 &&
+    Number.isInteger(data.invalidRecipientCount)
+  );
 }
 
-export function loadWorkflowDraft(workflowId: string): WorkflowDraft | null {
+/** Load locally cached recipients only — chat/workflow state comes from the API. */
+export function loadRecipientDraft(workflowId: string): RecipientDraft | null {
   try {
     const raw = localStorage.getItem(getStorageKey(workflowId));
     if (!raw) {
       return null;
     }
-
     const parsed: unknown = JSON.parse(raw);
-    if (!isValidWorkflowDraft(parsed, workflowId)) {
-      clearWorkflowDraft(workflowId);
+    if (!isValidRecipientDraft(parsed, workflowId)) {
+      clearRecipientDraft(workflowId);
       return null;
     }
-
-    return {
-      ...parsed,
-      messages: sanitizeChatMessages(parsed.messages),
-    };
+    return parsed;
   } catch {
-    clearWorkflowDraft(workflowId);
+    clearRecipientDraft(workflowId);
     return null;
   }
 }
 
-export function hasWorkflowDraft(workflowId: string): boolean {
-  return loadWorkflowDraft(workflowId) !== null;
-}
-
-export interface SaveWorkflowDraftInput {
+export function saveRecipientDraft(input: {
   workflowId: string;
-  workflow: WorkflowState;
-  workflowDefinition?: WorkflowDefinition | null;
-  messages: ChatMessage[];
-  campaign: CampaignMetadata;
   recipients: Recipient[];
   invalidRecipientCount: number;
-  campaignBrief?: CampaignBrief | null;
-  briefStatus?: BriefStatus;
-}
-
-export function saveWorkflowDraft(input: SaveWorkflowDraftInput): void {
-  const draft: WorkflowDraft = {
-    version: WORKFLOW_DRAFT_VERSION,
+}): void {
+  const draft: RecipientDraft = {
+    version: RECIPIENT_DRAFT_VERSION,
     workflowId: input.workflowId,
-    workflow: input.workflow,
-    workflowDefinition: input.workflowDefinition ?? null,
-    messages: input.messages,
-    campaign: input.campaign,
     recipients: input.recipients,
     invalidRecipientCount: input.invalidRecipientCount,
-    campaignBrief: input.campaignBrief ?? null,
-    briefStatus: input.briefStatus ?? null,
     updatedAt: new Date().toISOString(),
   };
-
   try {
     localStorage.setItem(getStorageKey(input.workflowId), JSON.stringify(draft));
   } catch {
-    // Quota or private mode — fail silently per local-only MVP
+    // Quota or private mode — fail silently
   }
 }
 
-export function clearWorkflowDraft(workflowId: string): void {
+export function clearRecipientDraft(workflowId: string): void {
   try {
     localStorage.removeItem(getStorageKey(workflowId));
   } catch {
@@ -211,12 +97,57 @@ export function clearWorkflowDraft(workflowId: string): void {
   }
 }
 
-export function createEmptyCampaignMetadata(
-  isNewWorkflow: boolean,
-): CampaignMetadata {
+/** @deprecated Use loadRecipientDraft — kept for migration from workflow-draft:* keys. */
+export function loadWorkflowDraft(workflowId: string): {
+  recipients: Recipient[];
+  invalidRecipientCount: number;
+} | null {
+  const draft = loadRecipientDraft(workflowId);
+  if (draft) {
+    return {
+      recipients: draft.recipients,
+      invalidRecipientCount: draft.invalidRecipientCount,
+    };
+  }
+  try {
+    const legacyRaw = localStorage.getItem(`workflow-draft:${workflowId}`);
+    if (!legacyRaw) {
+      return null;
+    }
+    const parsed: unknown = JSON.parse(legacyRaw);
+    if (!isRecord(parsed) || parsed.workflowId !== workflowId) {
+      return null;
+    }
+    const recipients = parsed.recipients;
+    const invalid = parsed.invalidRecipientCount;
+    if (!Array.isArray(recipients) || typeof invalid !== "number") {
+      return null;
+    }
+    const validRecipients = recipients.filter(isValidRecipient);
+    return {
+      recipients: validRecipients,
+      invalidRecipientCount: invalid,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearWorkflowDraft(workflowId: string): void {
+  clearRecipientDraft(workflowId);
+  try {
+    localStorage.removeItem(`workflow-draft:${workflowId}`);
+  } catch {
+    // ignore
+  }
+}
+
+export function createEmptyCampaignMetadata(isNewWorkflow: boolean): {
+  firstPrompt: string | null;
+  builderStage: "prompt" | "builder";
+} {
   return {
     firstPrompt: null,
     builderStage: isNewWorkflow ? "prompt" : "builder",
   };
 }
-

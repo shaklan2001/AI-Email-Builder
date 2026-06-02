@@ -20,6 +20,7 @@ interface EmailReviewPanelProps {
   workflowDefinition: WorkflowDefinition;
   onWorkflowChange: (workflow: WorkflowDefinition) => void;
   onWorkflowOptimisticChange?: (workflow: WorkflowDefinition) => void;
+  embedded?: boolean;
 }
 
 function getStepTitle(step: WorkflowStep): string {
@@ -198,6 +199,7 @@ export function EmailReviewPanel({
   workflowDefinition,
   onWorkflowChange,
   onWorkflowOptimisticChange,
+  embedded = false,
 }: EmailReviewPanelProps) {
   const emailSteps = workflowDefinition.steps.filter(
     (s) => s.type === "send_email" && s.email,
@@ -210,22 +212,28 @@ export function EmailReviewPanel({
   return (
     <Box
       sx={{
-        borderTop: 1,
-        borderColor: "divider",
-        flexShrink: 0,
-        maxHeight: "45%",
+        flex: embedded ? 1 : undefined,
+        minHeight: embedded ? 0 : undefined,
+        flexShrink: embedded ? undefined : 0,
+        maxHeight: embedded ? undefined : "45%",
         overflowY: "auto",
-        bgcolor: "background.paper",
+        bgcolor: embedded ? "transparent" : "background.paper",
+        borderTop: embedded ? 0 : 1,
+        borderColor: "divider",
+        px: embedded ? 2 : 0,
+        py: embedded ? 2 : 0,
       }}
     >
-      <Typography
-        variant="overline"
-        color="text.secondary"
-        sx={{ display: "block", px: 3, pt: 2, pb: 1 }}
-      >
-        Email Review
-      </Typography>
-      <Box sx={{ px: 2, pb: 2 }}>
+      {!embedded && (
+        <Typography
+          variant="overline"
+          color="text.secondary"
+          sx={{ display: "block", px: 3, pt: 2, pb: 1 }}
+        >
+          Email Review
+        </Typography>
+      )}
+      <Box sx={{ px: embedded ? 0 : 2, pb: embedded ? 0 : 2 }}>
         {emailSteps.map((step) => (
           <EmailStepEditor
             key={step.id}

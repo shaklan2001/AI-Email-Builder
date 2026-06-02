@@ -1,3 +1,4 @@
+import { formatWaitLabel, waitLabelForStep } from "./format-wait-label";
 import {
   defaultWorkflowState,
   type WorkflowState,
@@ -5,18 +6,25 @@ import {
 import type { WorkflowDefinition, WorkflowStep } from "../types/workflow-definition";
 
 function formatConditionLabel(condition: string): string {
+  if (condition === "reply_received") {
+    return "Reply?";
+  }
   const words = condition.replace(/_/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1) + "?";
 }
 
-function stepLabel(step: WorkflowStep): string {
+function stepLabel(step: WorkflowStep, definition: WorkflowDefinition | null): string {
   if (step.type === "send_email") {
     return step.name ?? "Send Email";
   }
   if (step.type === "wait") {
-    const days = step.days ?? 3;
-    const dayWord = days === 1 ? "Day" : "Days";
-    return `Wait ${days} ${dayWord}`;
+    return waitLabelForStep(step, definition?.followUpDelay);
+  }
+  if (step.type === "reply_condition") {
+    return "Reply?";
+  }
+  if (step.type === "interested_branch") {
+    return step.name ?? "AI Reply Agent";
   }
   if (step.type === "condition" && step.condition) {
     return formatConditionLabel(step.condition);
@@ -37,7 +45,11 @@ export function workflowDefinitionToState(
 
   const sendEmails = definition.steps.filter((s) => s.type === "send_email");
   const waitStep = definition.steps.find((s) => s.type === "wait");
-  const conditionStep = definition.steps.find((s) => s.type === "condition");
+  const conditionStep = definition.steps.find(
+    (s) =>
+      s.type === "reply_condition" ||
+      (s.type === "condition" && s.condition === "reply_received"),
+  );
 
   const yesBranch = definition.steps.find(
     (s) => s.type === "send_email" && s.branch === "yes",
@@ -50,23 +62,31 @@ export function workflowDefinitionToState(
   const extraSteps = sendEmails
     .slice(1)
     .filter((s) => s.branch !== "yes" && s.branch !== "no")
-    .map(stepLabel);
+    .map((s) => stepLabel(s, definition));
+
+  const waitLabel = definition.followUpDelay
+    ? formatWaitLabel(definition.followUpDelay)
+    : waitStep
+      ? stepLabel(waitStep, definition)
+      : defaultWorkflowState.waitLabel;
 
   return {
-    initialEmailLabel: initialEmail ? stepLabel(initialEmail) : "Send Initial Email",
-    waitLabel: waitStep ? stepLabel(waitStep) : defaultWorkflowState.waitLabel,
+    initialEmailLabel: initialEmail ? stepLabel(initialEmail, definition) : "Send Initial Email",
+    waitLabel,
     conditionLabel: conditionStep
-      ? stepLabel(conditionStep)
+      ? stepLabel(conditionStep, definition)
       : defaultWorkflowState.conditionLabel,
-    yesBranchLabel: yesBranch
-      ? stepLabel(yesBranch)
-      : sendEmails[1]
-        ? stepLabel(sendEmails[1])
-        : defaultWorkflowState.yesBranchLabel,
+    yesBranchLabel: conditionStep?.condition === "reply_received"
+      ? "AI Reply Agent"
+      : yesBranch
+        ? stepLabel(yesBranch, definition)
+        : sendEmails[1]
+          ? stepLabel(sendEmails[1], definition)
+          : defaultWorkflowState.yesBranchLabel,
     noBranchLabel: noBranch
-      ? stepLabel(noBranch)
+      ? stepLabel(noBranch, definition)
       : sendEmails[2]
-        ? stepLabel(sendEmails[2])
+        ? stepLabel(sendEmails[2], definition)
         : defaultWorkflowState.noBranchLabel,
     extraSteps,
   };
