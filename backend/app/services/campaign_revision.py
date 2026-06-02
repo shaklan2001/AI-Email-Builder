@@ -29,6 +29,26 @@ _REVISION_PHRASES: tuple[str, ...] = (
     "different product",
     "forget the ",
     "ignore the ",
+    "set the ",
+    "set my ",
+    "make it ",
+    "call it ",
+    "rename ",
+    "remove ",
+    "clear ",
+    "delete ",
+    "drop ",
+)
+
+# Explicit field assignments — user is setting a value even without "change"/"update".
+_EXPLICIT_FIELD_ASSIGNMENT = re.compile(
+    r"\b(?:"
+    r"product(?:\s+name)?|service(?:\s+name)?|"
+    r"campag(?:n|io)n(?:\s+name)?|campaign(?:\s+name)?|"
+    r"audience|tone|cta|goal|business\s+goal|"
+    r"landing\s+page|website|image(?:\s+url)?|product\s+image"
+    r")\s+(?:is|as|to|=)\s+",
+    re.IGNORECASE,
 )
 
 _PIVOT_PHRASES: tuple[str, ...] = (
@@ -54,12 +74,33 @@ _CAMPAIGN_STATE_FIELDS: tuple[str, ...] = (
 )
 
 
+def is_explicit_field_update(text: str) -> bool:
+    """True when the user names a field and assigns a new value in plain language."""
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    return bool(_EXPLICIT_FIELD_ASSIGNMENT.search(cleaned))
+
+
+def should_overwrite_campaign_fields(
+    text: str,
+    *,
+    brief_status: str | None = None,
+) -> bool:
+    """True when user intent should replace existing campaign field values."""
+    if brief_status == "editing":
+        return True
+    return is_revision_message(text) or is_explicit_field_update(text)
+
+
 def is_revision_message(text: str) -> bool:
     lower = text.lower().strip()
     if not lower:
         return False
-    return any(phrase in lower for phrase in _REVISION_PHRASES) or any(
-        phrase in lower for phrase in _PIVOT_PHRASES
+    return (
+        any(phrase in lower for phrase in _REVISION_PHRASES)
+        or any(phrase in lower for phrase in _PIVOT_PHRASES)
+        or is_explicit_field_update(text)
     )
 
 
@@ -83,10 +124,16 @@ def is_material_change(before: CampaignData, after: CampaignData) -> bool:
 
 
 def stale_artifact_reset(*, clear_brief: bool = True) -> dict[str, object]:
-    """Drop generated workflow and approval so the latest brief is the only source of truth."""
+    """Drop generated artifacts so the latest campaign fields are the only source of truth."""
+    from app.schemas.conversation_stage import ConversationStage
+
     reset: dict[str, object] = {
         "workflow": None,
+        "email_templates": [],
         "brief_approved": False,
+        "review_status": None,
+        "regenerate_workflow": False,
+        "current_stage": ConversationStage.DISCOVERY,
     }
     if clear_brief:
         reset["campaign_brief"] = None

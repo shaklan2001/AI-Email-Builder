@@ -1,7 +1,19 @@
+import re
+
 import resend
 
 from app.core.config import settings
+from app.core.logger import get_logger
 from app.providers.email.base import EmailProvider, EmailProviderError
+
+logger = get_logger(__name__)
+
+_RESEND_TAG_VALUE_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def sanitize_resend_tag_value(value: str) -> str:
+    sanitized = _RESEND_TAG_VALUE_PATTERN.sub("-", value.strip()).strip("-")
+    return sanitized or "unknown"
 
 
 class ResendProvider(EmailProvider):
@@ -16,6 +28,8 @@ class ResendProvider(EmailProvider):
         html_content: str,
         plain_text_content: str,
         recipients: list[str],
+        reply_to: str | None = None,
+        tags: dict[str, str] | None = None,
     ) -> str:
         resend.api_key = self._api_key
         params: resend.Emails.SendParams = {
@@ -25,6 +39,28 @@ class ResendProvider(EmailProvider):
             "html": html_content,
             "text": plain_text_content,
         }
+        inbound = settings.resend_inbound_email.strip()
+        resolved_reply_to = (reply_to or inbound or "").strip()
+        if resolved_reply_to:
+            params["reply_to"] = resolved_reply_to
+        else:
+            logger.warning(
+                "resend_inbound_not_configured",
+                detail=(
+                    "RESEND_INBOUND_EMAIL is empty — Gmail Reply will go to the From "
+                    "address and Resend will not receive the reply. Set your "
+                    "@xxxx.resend.app address in .env."
+                ),
+            )
+        if tags:
+            params["tags"] = [
+                {
+                    "name": sanitize_resend_tag_value(key),
+                    "value": sanitize_resend_tag_value(value),
+                }
+                for key, value in tags.items()
+                if key.strip() and value.strip()
+            ]
         try:
             response = await resend.Emails.send_async(params)
         except Exception as exc:

@@ -1,11 +1,16 @@
 from contextlib import asynccontextmanager
 
+from app.core.langsmith_tracing import setup_langsmith_tracing
+
+setup_langsmith_tracing()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat, email, recipients, review, workflows
+from app.api import agent_tools, analytics, chat, email, recipients, review, webhooks, workflows
 from app.core.config import settings
 from app.core.database import close_db, connect_db
+from app.core.redis_client import ping_redis
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logger import setup_logging
 
@@ -37,15 +42,23 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
 
+    app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
+    app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
     app.include_router(workflows.router, prefix="/api/v1/workflows", tags=["workflows"])
+    app.include_router(agent_tools.router, prefix="/api/v1/workflows", tags=["agent-tools"])
     app.include_router(recipients.router, prefix="/api/v1/recipients", tags=["recipients"])
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
     app.include_router(email.router, prefix="/api/v1/email", tags=["email"])
+    app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"])
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        redis_ok = await ping_redis()
+        return {
+            "status": "ok",
+            "redis": "connected" if redis_ok else "unavailable",
+        }
 
     return app
 

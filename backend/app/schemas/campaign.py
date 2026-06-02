@@ -12,6 +12,8 @@ class CampaignData(BaseModel):
     cta: str | None = None
     landing_page: str | None = None
     product_image: str | None = None
+    attachments: str | None = None
+    competitors: str | None = None
 
     def merge(self, other: "CampaignData", *, revision: bool = False) -> "CampaignData":
         """Merge extracted fields. Revision mode overwrites with non-empty values from other."""
@@ -25,12 +27,14 @@ class CampaignData(BaseModel):
         return CampaignData.model_validate(data)
 
     def apply_updates(self, updates: dict[str, str | None]) -> "CampaignData":
-        """Apply explicit user corrections (overwrites allowed)."""
+        """Apply explicit user corrections (overwrites and clears allowed)."""
         data = self.model_dump()
         for field, value in updates.items():
             if field not in CampaignData.model_fields:
                 continue
-            if value is not None and str(value).strip():
+            if value is None:
+                data[field] = None
+            elif str(value).strip():
                 data[field] = str(value).strip()
         return CampaignData.model_validate(data)
 
@@ -44,6 +48,23 @@ class CampaignData(BaseModel):
         """True when product/service is known — optional fields may use defaults."""
         return not self.missing_fields()
 
+    def has_required_for_workflow_with_delay(
+        self,
+        follow_up_delay: object = None,
+        *,
+        wants_follow_up: object = None,
+        email_length: object = None,
+    ) -> bool:
+        """True when product, email length, follow-up preference, and delay (if needed) are set."""
+        from app.services.campaign_field_policy import is_ready_for_campaign_brief
+
+        return is_ready_for_campaign_brief(
+            self,
+            follow_up_delay=follow_up_delay,
+            wants_follow_up=wants_follow_up,
+            email_length=email_length,
+        )
+
     def filled_summary(self) -> str:
         lines: list[str] = []
         labels = {
@@ -54,7 +75,9 @@ class CampaignData(BaseModel):
             "tone": "Tone",
             "cta": "CTA",
             "landing_page": "Landing Page",
-            "product_image": "Image",
+            "product_image": "Images",
+            "attachments": "Attachments",
+            "competitors": "Competitors",
         }
         for key, label in labels.items():
             value = getattr(self, key)
@@ -68,3 +91,24 @@ class CampaignData(BaseModel):
             "AUTHORITATIVE CAMPAIGN BRIEF (use only these values — ignore older topics):\n"
             f"{self.filled_summary()}"
         )
+
+    def email_generation_context(self) -> str:
+        """Inputs for the email generation agent (product, audience, CTA, website, image, tone)."""
+        lines: list[str] = ["CAMPAIGN INPUTS FOR EMAIL GENERATION:"]
+        fields: tuple[tuple[str, str], ...] = (
+            ("campaign_name", "Campaign / Company Name"),
+            ("business_goal", "Business Goal"),
+            ("product_info", "Product"),
+            ("audience", "Audience"),
+            ("cta", "CTA"),
+            ("landing_page", "Website"),
+            ("product_image", "Image URL"),
+            ("tone", "Tone"),
+        )
+        for key, label in fields:
+            value = getattr(self, key, None)
+            if value and str(value).strip():
+                lines.append(f"- {label}: {value}")
+        if len(lines) == 1:
+            lines.append("- (no campaign inputs collected yet)")
+        return "\n".join(lines)

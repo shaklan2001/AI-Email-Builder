@@ -22,32 +22,37 @@ def campaign_from_brief_dict(
         parsed = CampaignBriefData.model_validate(
             {
                 "campaignName": brief.get("campaignName"),
-                "businessGoal": brief.get("businessGoal"),
                 "audience": brief.get("audience"),
                 "productInfo": brief.get("productInfo"),
                 "tone": brief.get("tone"),
                 "cta": brief.get("cta"),
                 "landingPage": brief.get("landingPage"),
-                "attachments": brief.get("attachments"),
+                "imageUrl": brief.get("imageUrl"),
             },
         )
     except Exception:
         return base
 
-    image_url: str | None = base.product_image
-    attachments = parsed.attachments
-    if attachments and str(attachments).strip().lower().startswith("product image:"):
-        image_url = str(attachments).replace("Product image:", "", 1).strip()
+    image_url: str | None = parsed.image_url or base.product_image
+    legacy_attachments = brief.get("attachments")
+    if (
+        not image_url
+        and legacy_attachments
+        and str(legacy_attachments).strip().lower().startswith("product image:")
+    ):
+        image_url = str(legacy_attachments).replace("Product image:", "", 1).strip()
 
     return CampaignData(
         campaign_name=parsed.campaign_name or base.campaign_name,
-        business_goal=parsed.business_goal or base.business_goal,
+        business_goal=base.business_goal,
         product_info=parsed.product_info or base.product_info,
         audience=parsed.audience or base.audience,
         tone=parsed.tone or base.tone,
         cta=parsed.cta or base.cta,
         landing_page=parsed.landing_page or base.landing_page,
         product_image=image_url,
+        attachments=base.attachments,
+        competitors=base.competitors,
     )
 
 

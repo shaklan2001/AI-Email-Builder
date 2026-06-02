@@ -1,9 +1,15 @@
-from app.langgraph.state import CampaignState
+from app.langgraph.state import ConversationState
+from app.services.conversation_state_service import (
+    should_expose_brief_preview,
+    should_expose_workflow_preview,
+)
 from app.schemas.campaign_brief import CampaignBriefData
 from app.schemas.email import GeneratedEmailContent
+from app.schemas.follow_up_delay import FollowUpDelay
 from app.schemas.requests import (
     CampaignBriefFieldData,
     EmailBodyVersionData,
+    FollowUpDelayData,
     GeneratedEmailData,
     WorkflowDefinitionData,
     WorkflowStepData,
@@ -69,7 +75,9 @@ def email_from_step_dict(item: dict[str, object]) -> GeneratedEmailData | None:
         )
 
 
-def brief_from_state(state: CampaignState) -> CampaignBriefFieldData | None:
+def brief_from_state(state: ConversationState) -> CampaignBriefFieldData | None:
+    if not should_expose_brief_preview(state):
+        return None
     raw = state.get("campaign_brief")
     if not raw or not isinstance(raw, dict):
         return None
@@ -80,7 +88,9 @@ def brief_from_state(state: CampaignState) -> CampaignBriefFieldData | None:
     return CampaignBriefFieldData.model_validate(brief.to_api_dict())
 
 
-def workflow_from_state(state: CampaignState) -> WorkflowDefinitionData | None:
+def workflow_from_state(state: ConversationState) -> WorkflowDefinitionData | None:
+    if not should_expose_workflow_preview(state):
+        return None
     raw = state.get("workflow")
     if not raw or not isinstance(raw, dict):
         return None
@@ -104,6 +114,8 @@ def workflow_from_state(state: CampaignState) -> WorkflowDefinitionData | None:
                 type=step_type,
                 name=item.get("name") if isinstance(item.get("name"), str) else None,
                 days=item.get("days") if isinstance(item.get("days"), int) else None,
+                value=item.get("value") if isinstance(item.get("value"), int) else None,
+                unit=item.get("unit") if isinstance(item.get("unit"), str) else None,
                 condition=item.get("condition")
                 if isinstance(item.get("condition"), str)
                 else None,
@@ -116,7 +128,20 @@ def workflow_from_state(state: CampaignState) -> WorkflowDefinitionData | None:
         return None
 
     workflow_type = raw.get("workflow_type")
+    delay_raw = raw.get("follow_up_delay")
+    follow_up_delay: FollowUpDelayData | None = None
+    if isinstance(delay_raw, dict):
+        try:
+            parsed_delay = FollowUpDelay.model_validate(delay_raw)
+            follow_up_delay = FollowUpDelayData(
+                value=parsed_delay.value,
+                unit=parsed_delay.unit,
+            )
+        except Exception:
+            follow_up_delay = None
+
     return WorkflowDefinitionData(
         workflow_type=workflow_type if isinstance(workflow_type, str) else None,
+        follow_up_delay=follow_up_delay,
         steps=steps,
     )

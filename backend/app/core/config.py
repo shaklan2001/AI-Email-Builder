@@ -1,5 +1,6 @@
 from urllib.parse import quote_plus
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,12 +21,31 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
+    enable_langsmith_tracing: bool = Field(
+        default=False,
+        validation_alias="LANGSMITH_TRACING",
+    )
+    langsmith_api_key: str = ""
+    langchain_project: str = Field(
+        default="",
+        validation_alias=AliasChoices("LANGCHAIN_PROJECT", "LANGSMITH_PROJECT"),
+    )
     resend_api_key: str = ""
     resend_from_email: str = "onboarding@resend.dev"
+    resend_webhook_secret: str = ""
+    resend_inbound_email: str = ""
+    calendar_booking_url: str = "https://www.nishantshaklan.co.in/"
     mongodb_user: str = "shaklan2001"
     mongodb_password: str = ""
     mongodb_host: str = "cluster0.exphul2.mongodb.net"
     mongodb_db_name: str = "email_workflow_builder"
+    redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: str = ""
+    celery_result_backend: str = "redis://localhost:6379/1"
+
+    @property
+    def celery_broker(self) -> str:
+        return self.celery_broker_url.strip() or self.redis_url
 
     @property
     def cors_origins_list(self) -> list[str]:

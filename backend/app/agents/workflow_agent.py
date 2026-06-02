@@ -1,38 +1,43 @@
 import json
 import re
 
+from langsmith import traceable
+
 from app.providers.llm.base import LLMProvider, LLMProviderError
 from app.providers.llm.groq_provider import get_groq_provider
 from app.schemas.campaign import CampaignData
-from app.schemas.workflow import WorkflowDefinition, WorkflowStep, WorkflowType
+from app.schemas.follow_up_delay import FollowUpDelay
+from app.schemas.workflow import WorkflowDefinition, WorkflowStep
+from app.services.workflow_structure import (
+    GENERATION_STEP_TYPES,
+    finalize_generation_workflow,
+)
 
-_WORKFLOW_SYSTEM = """You are a sales and marketing campaign strategist designing email automation workflows.
-Analyze the collected campaign information and produce a workflow definition as JSON only.
+_WORKFLOW_SYSTEM = """You are a sales email automation strategist designing outreach workflows.
+Analyze the campaign information and produce a workflow definition as JSON only.
 
-Supported workflow types (set workflow_type accordingly):
-- linear: sequential steps only
-- conditional: includes at least one condition branch (e.g. reply_received)
-- multi_level_conditional: multiple nested or chained conditions
+Output shape (ONLY this object, no markdown):
+{
+  "steps": [
+    { "id": "step_1", "type": "send_email", "name": "short step purpose label" },
+    { "id": "step_2", "type": "wait" },
+    { "id": "step_3", "type": "reply_condition" },
+    { "id": "step_4", "type": "interested_branch", "name": "AI Reply Agent" },
+    { "id": "step_5", "type": "no_reply_branch" },
+    { "id": "step_6", "type": "send_email", "name": "follow-up step purpose label" }
+  ]
+}
 
-Step types allowed: send_email, wait, condition, end
+Allowed step types ONLY: send_email, wait, reply_condition, interested_branch, no_reply_branch
 
 Rules:
-- Do NOT include email body content, subject lines, or sending actions — only workflow structure.
-- send_email steps need a short descriptive "name" (step purpose, not email copy).
-- wait steps need "days" (positive integer).
-- condition steps need "condition" (e.g. reply_received, link_clicked).
-- For conditional workflows, tag branch steps with "branch": "yes" or "branch": "no".
-- Use unique step ids like step_1, step_2, etc.
-- Return ONLY valid JSON with this shape:
-{
-  "workflow_type": "linear" | "conditional" | "multi_level_conditional",
-  "steps": [
-    { "id": "step_1", "type": "send_email", "name": "..." },
-    { "id": "step_2", "type": "wait", "days": 3 },
-    { "id": "step_3", "type": "condition", "condition": "reply_received" },
-    { "id": "step_4", "type": "send_email", "name": "...", "branch": "no" }
-  ]
-}"""
+- Do NOT include email body, subject lines, or HTML — structure only.
+- Always include exactly this flow order: initial send_email → wait → reply_condition → interested_branch → no_reply_branch → follow-up send_email.
+- send_email steps need a short descriptive "name" (purpose, not email copy).
+- wait step has no timing fields — follow-up delay is applied from user settings after generation.
+- reply_condition, interested_branch, and no_reply_branch are single nodes with no extra fields except optional "name" on interested_branch.
+- Use unique step ids: step_1, step_2, etc.
+- Return ONLY valid JSON."""
 
 
 def _parse_json_object(text: str) -> dict[str, object]:
@@ -74,17 +79,18 @@ def _validate_workflow_payload(raw: dict[str, object]) -> WorkflowDefinition:
     for item in steps_raw:
         if not isinstance(item, dict):
             continue
+        step_type = item.get("type")
+        if step_type not in GENERATION_STEP_TYPES:
+            continue
+        step_id = item.get("id")
+        if not isinstance(step_id, str) or not step_id.strip():
+            continue
         try:
             steps.append(WorkflowStep.model_validate(item))
         except Exception:
             continue
 
-    workflow_type_raw = raw.get("workflow_type")
-    workflow_type: WorkflowType | None = None
-    if workflow_type_raw in ("linear", "conditional", "multi_level_conditional"):
-        workflow_type = workflow_type_raw
-
-    return WorkflowDefinition(workflow_type=workflow_type, steps=steps)
+    return WorkflowDefinition(steps=steps)
 
 
 class WorkflowAgent:
@@ -98,15 +104,28 @@ class WorkflowAgent:
             return self._llm
         return get_groq_provider()
 
+    @traceable(run_type="chain", name="workflow_generation")
     async def generate_workflow(
         self,
         campaign: CampaignData,
+        *,
+        follow_up_delay: FollowUpDelay | None,
+        wants_follow_up: bool = True,
     ) -> tuple[WorkflowDefinition, str]:
+        if wants_follow_up and follow_up_delay is not None:
+            delay_note = f"{follow_up_delay.value} {follow_up_delay.unit}"
+            follow_up_line = f"Follow-up if no reply: {delay_note}\n\n"
+        else:
+            follow_up_line = (
+                "Follow-up if no reply: disabled — user chose initial email only.\n\n"
+            )
+
         user_prompt = (
             f"{campaign.authoritative_summary()}\n\n"
-            "Design the best workflow structure for this campaign. "
-            "Use ONLY the campaign brief above — ignore any other products or goals. "
-            "Choose linear, conditional, or multi_level_conditional based on the goals."
+            f"{follow_up_line}"
+            "Design the workflow structure for this campaign. "
+            "Use ONLY the campaign brief above. "
+            "Name the initial and follow-up send_email steps to match the campaign goal."
         )
 
         llm = self._get_llm()
@@ -115,21 +134,45 @@ class WorkflowAgent:
         except LLMProviderError as exc:
             raise exc
 
-        definition = _validate_workflow_payload(_parse_json_object(raw_text))
+        parsed = _validate_workflow_payload(_parse_json_object(raw_text))
+        definition = finalize_generation_workflow(
+            parsed,
+            follow_up_delay,
+            wants_follow_up=wants_follow_up,
+        )
         if not definition.steps:
             raise LLMProviderError("Workflow generation returned no valid steps")
 
-        reply = self._build_acknowledgement(definition)
+        reply = self._build_acknowledgement(
+            definition,
+            follow_up_delay,
+            wants_follow_up=wants_follow_up,
+        )
         return definition, reply
 
     @staticmethod
-    def _build_acknowledgement(definition: WorkflowDefinition) -> str:
+    def _build_acknowledgement(
+        definition: WorkflowDefinition,
+        delay: FollowUpDelay | None,
+        *,
+        wants_follow_up: bool = True,
+    ) -> str:
+        from app.services.follow_up_delay import format_wait_label
+
         step_count = len(definition.steps)
-        wf_type = definition.workflow_type or "custom"
+        if wants_follow_up and delay is not None:
+            wait_label = format_wait_label(delay)
+            return (
+                f"I've built your outreach workflow with {step_count} steps — "
+                f"initial email, {wait_label.lower()}, then a reply branch with AI handling "
+                "interested replies and a follow-up if there's no reply. "
+                "Review the preview on the right and tell me if you'd like to adjust timing or step names."
+            )
         return (
-            f"I've drafted a {wf_type.replace('_', ' ')} workflow with {step_count} steps "
-            "based on your campaign details. Review the preview on the right — "
-            "tell me if you'd like to adjust timing, branches, or add steps."
+            f"I've built your outreach workflow with {step_count} steps — "
+            "initial email and AI reply handling when someone responds. "
+            "No follow-up email will be sent if there's no reply. "
+            "Review the preview on the right and tell me if you'd like any changes."
         )
 
 

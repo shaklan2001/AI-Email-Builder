@@ -6,7 +6,7 @@ import re
 
 from app.schemas.campaign import CampaignData
 from app.services.campaign_field_policy import infer_product_from_minimal_message
-from app.services.campaign_revision import is_revision_message
+from app.services.campaign_revision import is_explicit_field_update, is_revision_message
 
 _HTTP_URL = re.compile(r"https?://[^\s)>\"']+", re.IGNORECASE)
 _DOMAIN = re.compile(
@@ -59,8 +59,12 @@ _POSTER_HINT = re.compile(
     r"poster|email\s+template|in\s+(?:the\s+)?email",
     re.IGNORECASE,
 )
+_PRODUCT_NAME = re.compile(
+    r"(?:the\s+)?(?:product|service)\s+name\s+(?:is\s+|:|=)\s*(.+?)(?:\.|$)",
+    re.IGNORECASE,
+)
 _PRODUCT_PHRASE = re.compile(
-    r"(?:product|service)\s+(?:is\s+|:)\s*(.+?)(?:\.|$)",
+    r"(?:product|service)\s+(?:is\s+|:|=)\s*(.+?)(?:\.|$)",
     re.IGNORECASE,
 )
 _PROMOTING = re.compile(
@@ -69,6 +73,10 @@ _PROMOTING = re.compile(
 )
 _REPLACE_PRODUCT = re.compile(
     r"(?:replace|change|switch)\s+(?:to\s+)?(.+?)(?:\s+instead|\s+campaign|\.|$)",
+    re.IGNORECASE,
+)
+_CHANGE_PRODUCT = re.compile(
+    r"(?:change|update|set)\s+(?:the\s+)?(?:product|service)\s+(?:to\s+|:)\s*(.+?)(?:\.|$)",
     re.IGNORECASE,
 )
 
@@ -187,7 +195,13 @@ def _extract_cta(text: str) -> str | None:
 
 
 def _extract_product_info(text: str) -> str | None:
-    for pattern in (_PRODUCT_PHRASE, _PROMOTING, _REPLACE_PRODUCT):
+    name_match = _PRODUCT_NAME.search(text)
+    if name_match:
+        value = _strip_trailing_punctuation(name_match.group(1))
+        if value and 2 <= len(value) <= 200:
+            return value
+
+    for pattern in (_CHANGE_PRODUCT, _PRODUCT_PHRASE, _PROMOTING, _REPLACE_PRODUCT):
         match = pattern.search(text)
         if match:
             value = _strip_trailing_punctuation(match.group(1))
@@ -243,9 +257,40 @@ def _extract_my_page(text: str) -> str | None:
     return None
 
 
-def _extract_explicit_updates(text: str) -> dict[str, str]:
+_FIELD_CLEAR_ALIASES: dict[str, tuple[str, ...]] = {
+    "campaign_name": ("campaign name", "campagion name", "campagin name", "name"),
+    "product_info": ("product name", "product", "service"),
+    "audience": ("audience", "target audience"),
+    "business_goal": ("goal", "business goal"),
+    "tone": ("tone", "style"),
+    "cta": ("cta", "call to action", "call-to-action"),
+    "landing_page": ("landing page", "website", "url", "site"),
+    "product_image": ("image", "product image", "photo", "picture", "poster"),
+}
+
+_CLEAR_FIELD = re.compile(
+    r"\b(?:remove|clear|delete|drop|unset)\s+(?:the\s+)?(.+?)(?:\.|$)",
+    re.IGNORECASE,
+)
+
+
+def _extract_field_clears(text: str) -> dict[str, None]:
+    """Fields the user asked to remove from the campaign brief."""
+    match = _CLEAR_FIELD.search(text)
+    if not match:
+        return {}
+
+    target = match.group(1).strip().lower()
+    clears: dict[str, None] = {}
+    for field, aliases in _FIELD_CLEAR_ALIASES.items():
+        if any(alias in target for alias in aliases):
+            clears[field] = None
+    return clears
+
+
+def _extract_explicit_updates(text: str) -> dict[str, str | None]:
     """Corrections and explicit sets — always overwrite prior values."""
-    updates: dict[str, str] = {}
+    updates: dict[str, str | None] = dict(_extract_field_clears(text))
     lower = text.lower()
 
     name = _extract_campaign_name(text)
@@ -279,7 +324,7 @@ def _extract_explicit_updates(text: str) -> dict[str, str]:
     if product:
         updates["product_info"] = product
 
-    if is_revision_message(text):
+    if is_revision_message(text) or is_explicit_field_update(text):
         goal = _extract_business_goal(text)
         if goal:
             updates["business_goal"] = goal
@@ -296,9 +341,9 @@ def _extract_explicit_updates(text: str) -> dict[str, str]:
     return updates
 
 
-def _collect_field_updates(text: str, *, revision: bool) -> dict[str, str]:
+def _collect_field_updates(text: str, *, revision: bool) -> dict[str, str | None]:
     """Extract all fields mentioned in the latest user message (overwrites allowed)."""
-    updates: dict[str, str] = dict(_extract_explicit_updates(text))
+    updates: dict[str, str | None] = dict(_extract_explicit_updates(text))
 
     extractors: tuple[tuple[str, object], ...] = (
         ("campaign_name", _extract_campaign_name),
@@ -324,8 +369,8 @@ def _collect_field_updates(text: str, *, revision: bool) -> dict[str, str]:
     # Without revision keywords, only set fields clearly referenced in this message.
     lower = text.lower()
     field_triggers: dict[str, tuple[str, ...]] = {
-        "campaign_name": ("campaign name", "campagion name"),
-        "product_info": ("product", "service", "promoting", "t-shirt", "tshirt", "purifier"),
+        "campaign_name": ("campaign name", "campagion name", "campagin name", "name this campaign", "call it"),
+        "product_info": ("product name", "product", "service", "promoting", "t-shirt", "tshirt", "purifier"),
         "audience": ("audience", "age ", "target"),
         "business_goal": ("goal", "objective"),
         "tone": ("tone", "style"),
@@ -333,8 +378,11 @@ def _collect_field_updates(text: str, *, revision: bool) -> dict[str, str]:
         "landing_page": ("website", "landing page", "my page", "my site"),
         "product_image": ("image", "poster", "photo", "picture"),
     }
-    filtered: dict[str, str] = {}
+    filtered: dict[str, str | None] = {}
     for field, value in updates.items():
+        if value is None:
+            filtered[field] = None
+            continue
         triggers = field_triggers.get(field, ())
         if any(trigger in lower for trigger in triggers):
             filtered[field] = value

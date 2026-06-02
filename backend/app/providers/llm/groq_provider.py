@@ -2,18 +2,20 @@ import json
 import re
 
 from groq import AsyncGroq, GroqError
+from langsmith import traceable
 
 from app.core.config import settings
+from app.core.langsmith_usage import record_llm_token_usage
 from app.providers.llm.base import LLMProvider, LLMProviderError
 from app.schemas.campaign import CampaignData
 
 _EXTRACTION_SYSTEM = """You are a sales and marketing campaign strategist.
 Extract campaign information from the conversation.
 Return ONLY valid JSON with these keys (use null for unknown):
-campaign_name, business_goal, product_info, audience, tone, cta, landing_page, product_image
+campaign_name, business_goal, product_info, audience, tone, cta, landing_page, product_image, attachments, competitors
 
 Rules:
-- If the user says skip, none, don't know, not sure, or no preference for a field, leave that field null.
+- If the user says skip, none, don't know, not sure, no preference, doesn't matter, recommend for me, anything works, or you decide for a field, leave that field null.
 - Only product_info is strictly required; other fields may be omitted.
 - campaign_name: user-facing campaign title when they name the campaign
 - landing_page: website or landing URL only — not product image links (normalize bare domains to https://...)
@@ -25,7 +27,7 @@ Do not include markdown or explanation."""
 _EXTRACTION_REVISION_SYSTEM = """You are a sales and marketing campaign strategist.
 The user's LATEST message revises or replaces earlier campaign details.
 Return ONLY valid JSON with these keys (use null for fields not changed in the latest message):
-campaign_name, business_goal, product_info, audience, tone, cta, landing_page, product_image
+campaign_name, business_goal, product_info, audience, tone, cta, landing_page, product_image, attachments, competitors
 
 Rules:
 - Use ONLY the latest user message for changes — do NOT keep outdated products (e.g. AirPure) if the user switched campaigns.
@@ -92,6 +94,7 @@ class GroqProvider(LLMProvider):
         self._client = AsyncGroq(api_key=api_key)
         self._model = model
 
+    @traceable(run_type="llm", name="groq_chat_completion")
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
         try:
             response = await self._client.chat.completions.create(
@@ -105,11 +108,14 @@ class GroqProvider(LLMProvider):
         except GroqError as exc:
             raise LLMProviderError(f"Groq request failed: {exc}") from exc
 
+        record_llm_token_usage(getattr(response, "usage", None))
+
         content = response.choices[0].message.content
         if not content or not content.strip():
             raise LLMProviderError("Groq returned an empty response")
         return content.strip()
 
+    @traceable(run_type="chain", name="extract_campaign_data")
     async def extract_campaign_data(
         self,
         messages: list[dict[str, str]],

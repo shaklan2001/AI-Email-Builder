@@ -4,17 +4,29 @@ from fastapi import HTTPException, status
 
 from app.providers.email.base import EmailProvider, EmailProviderError
 from app.providers.email.resend_provider import get_resend_provider
+from app.repositories.analytics_repository import analytics_repository
 from app.repositories.conversation_repository import conversation_repository
+from app.repositories.email_message_repository import email_message_repository
+from app.repositories.lead_repository import lead_repository
 from app.repositories.workflow_repository import workflow_repository
 from app.schemas.email import EmailBodyVersion, GeneratedEmailContent
+from app.schemas.email_message import SendEmailResult
+from app.schemas.enums import LeadStatus
 from app.schemas.requests import EmailSendStatusData
+from app.services.analytics_service import AnalyticsService, analytics_service
 
 _EMAIL_REGEX = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 class EmailService:
-    def __init__(self, email_provider: EmailProvider | None = None) -> None:
+    def __init__(
+        self,
+        email_provider: EmailProvider | None = None,
+        analytics: AnalyticsService | None = None,
+    ) -> None:
         self._email_provider = email_provider
+        self._message_repository = email_message_repository
+        self._analytics_service = analytics or analytics_service
 
     def _provider(self) -> EmailProvider:
         if self._email_provider is not None:
@@ -119,7 +131,7 @@ class EmailService:
         if record is not None and isinstance(record.workflow_definition, dict):
             return record.workflow_definition
 
-        state = await conversation_repository.get_campaign_state(user_id, workflow_id)
+        state = await conversation_repository.get_conversation_state(user_id, workflow_id)
         if state is not None:
             raw_workflow = state.get("workflow")
             if isinstance(raw_workflow, dict):
@@ -129,6 +141,99 @@ class EmailService:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found",
         )
+
+    async def send_email(
+        self,
+        *,
+        workflow_id: str,
+        lead_id: str,
+        subject: str,
+        html_content: str,
+        plain_text_content: str,
+        step_id: str | None = None,
+    ) -> SendEmailResult:
+        recipient = lead_id.strip()
+        if not recipient:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lead email is required",
+            )
+        self.validate_recipients([recipient])
+
+        try:
+            provider = self._provider()
+            message_id = await provider.send_email(
+                subject=subject,
+                html_content=html_content,
+                plain_text_content=plain_text_content,
+                recipients=[recipient],
+                tags={
+                    "workflow_id": workflow_id,
+                    "lead_id": recipient.lower(),
+                },
+            )
+        except EmailProviderError as exc:
+            await self._message_repository.create_failed(
+                workflow_id=workflow_id,
+                lead_id=recipient.lower(),
+                step_id=step_id,
+            )
+            await self._analytics_service.record_failed(workflow_id)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+
+        await self._message_repository.create_sent(
+            resend_message_id=message_id,
+            workflow_id=workflow_id,
+            lead_id=recipient.lower(),
+            step_id=step_id,
+        )
+        await self._analytics_service.record_sent(workflow_id)
+        await lead_repository.upsert_for_workflow(
+            workflow_id=workflow_id,
+            email=recipient,
+            status=LeadStatus.EMAIL_SENT,
+        )
+
+        return SendEmailResult(
+            resend_message_id=message_id,
+            workflow_id=workflow_id,
+            lead_id=recipient.lower(),
+            step_id=step_id,
+        )
+
+    async def record_delivery_event(
+        self,
+        *,
+        resend_message_id: str,
+        event_type: str,
+    ) -> None:
+        record = await self._message_repository.get_by_resend_message_id(resend_message_id)
+        if record is None:
+            return
+
+        await self._message_repository.apply_tracking_event(
+            resend_message_id,
+            event=event_type,
+        )
+
+        lead_status_map = {
+            "delivered": None,
+            "opened": LeadStatus.OPENED,
+            "clicked": LeadStatus.CLICKED,
+            "replied": LeadStatus.REPLIED,
+            "failed": None,
+            "bounced": None,
+        }
+        lead_status = lead_status_map.get(event_type)
+        if lead_status is not None:
+            await lead_repository.update_status_for_event(
+                workflow_id=record.workflow_id,
+                email=record.lead_id,
+                status=lead_status,
+            )
 
     async def send_workflow_email(
         self,
@@ -157,23 +262,21 @@ class EmailService:
             )
         recipients = self.validate_recipients(raw_recipients)
 
-        try:
-            provider = self._provider()
-            message_id = await provider.send_email(
+        message_ids: list[str] = []
+        for recipient in recipients:
+            result = await self.send_email(
+                workflow_id=workflow_id,
+                lead_id=recipient,
                 subject=body.subject,
                 html_content=body.html_content,
                 plain_text_content=body.plain_text_content,
-                recipients=recipients,
+                step_id=step_id,
             )
-        except EmailProviderError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=str(exc),
-            ) from exc
+            message_ids.append(result.resend_message_id)
 
         return EmailSendStatusData(
             status="sent",
-            message_id=message_id,
+            message_id=message_ids[0] if message_ids else None,
             recipient_count=len(recipients),
             step_id=step_id,
         )

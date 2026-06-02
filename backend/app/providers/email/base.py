@@ -14,5 +14,7 @@ class EmailProvider(ABC):
         html_content: str,
         plain_text_content: str,
         recipients: list[str],
+        reply_to: str | None = None,
+        tags: dict[str, str] | None = None,
     ) -> str:
         """Send an email to the given recipients. Returns the provider message id."""

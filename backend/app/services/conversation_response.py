@@ -4,17 +4,39 @@ import re
 
 from app.langgraph.state import MessageDict
 from app.schemas.campaign import CampaignData
-from app.schemas.campaign_brief import CampaignBriefData
+from app.schemas.campaign_brief import (
+    DEFAULT_REPLY_HANDLING,
+    DEFAULT_TOOLS_AVAILABLE,
+    CampaignBriefData,
+)
 from app.schemas.workflow import WorkflowDefinition, WorkflowStep
+from app.schemas.follow_up_delay import FollowUpDelay
 from app.services.campaign_field_policy import (
+    EMAIL_LENGTH_FIELD,
     FIELD_LABELS,
+    FOLLOW_UP_DELAY_FIELD,
     REQUIRED_FIELD,
+    WANTS_FOLLOW_UP_FIELD,
     apply_field_defaults,
     assumption_lines,
     next_field_to_collect,
 )
+from app.services.collection_preferences import (
+    EMAIL_LENGTH_QUESTION,
+    WANTS_FOLLOW_UP_QUESTION,
+    format_email_length_brief,
+    format_wants_follow_up_brief,
+)
+from app.services.follow_up_delay import (
+    FOLLOW_UP_DELAY_QUESTION,
+    follow_up_delay_from_state,
+    format_follow_up_delay_brief,
+    format_wait_label,
+    parse_follow_up_delay,
+)
 
 _FIELD_QUESTIONS: dict[str, str] = {
+    "campaign_name": "What would you like to name this campaign?",
     "product_info": "What product or service is this campaign promoting?",
     "business_goal": "What is the main business goal for this campaign?",
     "audience": "Who is your target audience?",
@@ -22,15 +44,20 @@ _FIELD_QUESTIONS: dict[str, str] = {
     "cta": "What call-to-action should recipients take?",
     "landing_page": "What landing page or website URL should we use?",
     "product_image": "Do you have a product image URL to include?",
+    "attachments": "Do you have any files or attachments to include?",
+    "competitors": "Who are your main competitors, if any?",
 }
 
 _TONE_OPTIONS = ("Trendy", "Casual", "Premium", "Professional")
 
 _COLLECTED_DISPLAY: tuple[tuple[str, str], ...] = (
+    ("campaign_name", "Campaign Name"),
     ("product_info", "Product"),
     ("audience", "Audience"),
     ("landing_page", "Website"),
     ("product_image", "Product Image"),
+    ("attachments", "Attachments"),
+    ("competitors", "Competitors"),
     ("business_goal", "Goal"),
     ("tone", "Tone"),
     ("cta", "CTA"),
@@ -59,12 +86,18 @@ def next_missing_field(
     skipped_fields: set[str] | None = None,
     *,
     editing_brief: bool = False,
+    follow_up_delay: object = None,
+    wants_follow_up: object = None,
+    email_length: object = None,
 ) -> str | None:
     skipped = skipped_fields or set()
     return next_field_to_collect(
         campaign,
         skipped,
         include_optional=editing_brief,
+        follow_up_delay=follow_up_delay,
+        wants_follow_up=wants_follow_up,
+        email_length=email_length,
     )
 
 
@@ -82,6 +115,12 @@ def _confirmed_lines(campaign: CampaignData) -> list[str]:
 
 
 def _follow_up_question(field: str) -> str:
+    if field == EMAIL_LENGTH_FIELD:
+        return f"I have one question:\n\n{EMAIL_LENGTH_QUESTION}"
+    if field == WANTS_FOLLOW_UP_FIELD:
+        return f"I have one question:\n\n{WANTS_FOLLOW_UP_QUESTION}"
+    if field == FOLLOW_UP_DELAY_FIELD:
+        return f"I have one question:\n\n{FOLLOW_UP_DELAY_QUESTION}"
     question = _FIELD_QUESTIONS.get(field, "What else should I know for this campaign?")
     if field == REQUIRED_FIELD:
         return (
@@ -93,12 +132,12 @@ def _follow_up_question(field: str) -> str:
         options = "\n".join(f"• {option}" for option in _TONE_OPTIONS)
         return (
             f"I have one question:\n\n{question}\n\n{options}\n\n"
-            "(Say skip if you'd like me to choose a default.)"
+            "(Say skip, not sure, or recommend for me if you'd like a default.)"
         )
     if field != REQUIRED_FIELD:
         return (
             f"I have one question:\n\n{question}\n\n"
-            "(Optional — say skip to use a sensible default.)"
+            "(Optional — say skip, not sure, or recommend for me to use a sensible default.)"
         )
     return f"I have one question:\n\n{question}"
 
@@ -143,47 +182,21 @@ def _find_website_url_in_messages(messages: list[MessageDict]) -> str | None:
     return None
 
 
-def _find_attachments_hint(messages: list[MessageDict]) -> str | None:
+def _resolve_follow_up_delay_brief(
+    messages: list[MessageDict],
+    *,
+    follow_up_delay: object = None,
+) -> str | None:
+    delay = follow_up_delay_from_state(follow_up_delay)
+    if delay is not None:
+        return format_follow_up_delay_brief(delay)
     for message in reversed(messages):
         if message.get("role") != "user":
             continue
-        content = message.get("content", "").lower()
-        if any(
-            token in content
-            for token in ("attachment", "attached", "uploaded", "image", "pdf", "file")
-        ):
-            return message.get("content", "").strip()[:200] or None
+        parsed = parse_follow_up_delay(message.get("content", ""))
+        if parsed is not None:
+            return format_follow_up_delay_brief(parsed)
     return None
-
-
-def _infer_follow_up_strategy(messages: list[MessageDict]) -> str:
-    for message in reversed(messages):
-        if message.get("role") != "user":
-            continue
-        content = message.get("content", "")
-        wait_match = re.search(
-            r"wait\s+(\d+)\s*(day|days|week|weeks)",
-            content,
-            re.IGNORECASE,
-        )
-        if wait_match:
-            count = wait_match.group(1)
-            unit = wait_match.group(2).lower()
-            unit_label = unit if int(count) == 1 else f"{unit}s"
-            return f"Wait {count} {unit_label.title()}\nSend Follow-Up If No Reply"
-    return "Wait 3 Days\nSend Follow-Up If No Reply"
-
-
-def _infer_reply_strategy(campaign: CampaignData) -> str:
-    cta = _field_value(campaign, "cta")
-    goal = _field_value(campaign, "business_goal")
-    if cta and "demo" in cta.lower():
-        return "Send Demo Scheduling Email"
-    if goal and "demo" in goal.lower():
-        return "Send Demo Scheduling Email"
-    if cta:
-        return f"Send follow-up email aligned with: {cta}"
-    return "Send follow-up based on recipient response"
 
 
 def build_campaign_brief(
@@ -191,66 +204,91 @@ def build_campaign_brief(
     *,
     campaign_name: str | None,
     messages: list[MessageDict],
-    attachments: str | None = None,
+    product_image: str | None = None,
     landing_page: str | None = None,
-    follow_up_strategy: str | None = None,
-    reply_strategy: str | None = None,
+    follow_up_delay: object = None,
+    wants_follow_up: bool | None = None,
+    email_length: str | None = None,
+    email_length_words: int | None = None,
+    reply_handling: str | None = None,
     state_only: bool = False,
 ) -> CampaignBriefData:
     campaign = apply_field_defaults(campaign)
-    image_line = (
-        f"Product image: {_field_value(campaign, 'product_image')}"
-        if _field_value(campaign, "product_image")
-        else None
-    )
     resolved_landing = landing_page or _field_value(campaign, "landing_page")
     if not state_only and not resolved_landing:
         resolved_landing = _find_website_url_in_messages(messages)
 
-    resolved_attachments = attachments or image_line
-    if not state_only and not resolved_attachments:
-        resolved_attachments = _find_attachments_hint(messages)
+    resolved_image = product_image or _field_value(campaign, "product_image")
+    if not state_only and not resolved_image:
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content", "").lower()
+            if any(
+                token in content
+                for token in ("image", "poster", "photo", "picture", "img")
+            ):
+                resolved_image = message.get("content", "").strip()[:500] or None
+                break
+
+    resolved_follow_up_delay: str | None
+    if wants_follow_up is False:
+        resolved_follow_up_delay = "None — initial email only"
+    else:
+        resolved_follow_up_delay = _resolve_follow_up_delay_brief(
+            messages,
+            follow_up_delay=follow_up_delay,
+        )
 
     return CampaignBriefData(
         campaign_name=campaign_name,
-        business_goal=_field_value(campaign, "business_goal"),
         audience=_field_value(campaign, "audience"),
         product_info=_field_value(campaign, "product_info"),
         tone=_field_value(campaign, "tone"),
         cta=_field_value(campaign, "cta"),
-        attachments=resolved_attachments,
         landing_page=resolved_landing,
-        follow_up_strategy=follow_up_strategy
-        or _infer_follow_up_strategy(messages),
-        reply_strategy=reply_strategy or _infer_reply_strategy(campaign),
+        image_url=resolved_image,
+        email_length=format_email_length_brief(
+            email_length,
+            words=email_length_words,
+        ),
+        follow_up_enabled=format_wants_follow_up_brief(wants_follow_up),
+        follow_up_delay=resolved_follow_up_delay,
+        reply_handling=reply_handling or DEFAULT_REPLY_HANDLING,
+        tools_available=list(DEFAULT_TOOLS_AVAILABLE),
     )
 
 
 def format_campaign_brief_text(brief: CampaignBriefData) -> str:
+    tool_lines = [f"✓ {tool}" for tool in brief.tools_available]
     lines = [
         "Campaign Brief",
         "",
         f"Campaign Name:\n{_not_provided(brief.campaign_name)}",
         "",
-        f"Goal:\n{_not_provided(brief.business_goal)}",
+        f"Product:\n{_not_provided(brief.product_info)}",
         "",
         f"Audience:\n{_not_provided(brief.audience)}",
         "",
-        f"Product / Service:\n{_not_provided(brief.product_info)}",
+        f"CTA:\n{_not_provided(brief.cta)}",
         "",
         f"Tone:\n{_not_provided(brief.tone)}",
         "",
-        f"CTA:\n{_not_provided(brief.cta)}",
-        "",
-        f"Attachments:\n{_not_provided(brief.attachments)}",
+        f"Email Length:\n{_not_provided(brief.email_length)}",
         "",
         f"Landing Page:\n{_not_provided(brief.landing_page)}",
         "",
-        "Workflow Strategy",
+        f"Image URL:\n{_not_provided(brief.image_url)}",
         "",
-        f"Follow-Up Strategy:\n{_not_provided(brief.follow_up_strategy)}",
+        f"Follow-Up Email:\n{_not_provided(brief.follow_up_enabled)}",
         "",
-        f"Reply Strategy:\n{_not_provided(brief.reply_strategy)}",
+        f"Follow-Up Delay:\n{_not_provided(brief.follow_up_delay)}",
+        "",
+        f"Reply Handling:\n{_not_provided(brief.reply_handling)}",
+        "",
+        "Tools:",
+        "",
+        *(tool_lines or ["✓ Company Information", "✓ Demo Booking"]),
     ]
     return "\n".join(lines)
 
@@ -284,13 +322,16 @@ def build_brief_approval_reply(campaign: CampaignData | None = None) -> str:
 
 _BRIEF_CHANGE_LABELS: dict[str, str] = {
     "campaignName": "Campaign Name",
-    "businessGoal": "Business Goal",
-    "audience": "Target Audience",
-    "productInfo": "Product / Service",
+    "productInfo": "Product",
+    "audience": "Audience",
     "tone": "Tone",
     "cta": "CTA",
     "landingPage": "Landing Page",
-    "attachments": "Product Image",
+    "imageUrl": "Image URL",
+    "emailLength": "Email Length",
+    "followUpEnabled": "Follow-Up Email",
+    "followUpDelay": "Follow-Up Delay",
+    "replyHandling": "Reply Handling",
 }
 
 
@@ -305,6 +346,8 @@ def detect_brief_changes(
     for key, label in _BRIEF_CHANGE_LABELS.items():
         old_raw = previous.get(key)
         new_raw = current.get(key)
+        if isinstance(new_raw, list):
+            continue
         old_val = str(old_raw).strip() if old_raw is not None else ""
         new_val = str(new_raw).strip() if new_raw is not None else ""
         if not new_val or new_val == old_val:
@@ -345,11 +388,32 @@ def build_brief_edit_reply() -> str:
     )
 
 
+def _preference_confirmed_lines(
+    *,
+    email_length: object = None,
+    email_length_words: object = None,
+    wants_follow_up: object = None,
+) -> list[str]:
+    lines: list[str] = []
+    if isinstance(email_length, str) and email_length.strip():
+        words = email_length_words if isinstance(email_length_words, int) else None
+        lines.append(
+            f"✓ Email Length: {format_email_length_brief(email_length, words=words)}",
+        )
+    if isinstance(wants_follow_up, bool):
+        lines.append(f"✓ Follow-Up: {format_wants_follow_up_brief(wants_follow_up)}")
+    return lines
+
+
 def build_collection_reply(
     campaign: CampaignData,
     *,
     editing_brief: bool = False,
     skipped_fields: set[str] | None = None,
+    follow_up_delay: object = None,
+    wants_follow_up: object = None,
+    email_length: object = None,
+    email_length_words: object = None,
 ) -> str:
     """Confirm understanding, show progress, ask at most one follow-up question."""
     skipped = skipped_fields or set()
@@ -359,9 +423,18 @@ def build_collection_reply(
 
     sections: list[str] = []
 
-    if confirmed:
+    preference_lines = _preference_confirmed_lines(
+        email_length=email_length,
+        email_length_words=email_length_words,
+        wants_follow_up=wants_follow_up,
+    )
+
+    if confirmed or preference_lines:
         sections.append("Great, I've updated your campaign.")
-        sections.append("\n".join(confirmed))
+        if confirmed:
+            sections.append("\n".join(confirmed))
+        if preference_lines:
+            sections.append("\n".join(preference_lines))
     else:
         sections.append(
             "I'm starting your campaign setup — share what you know and I'll guide you step by step.",
@@ -369,7 +442,14 @@ def build_collection_reply(
 
     sections.append(f"Campaign Setup Progress\n\n{bar} {percent}%")
 
-    next_field = next_missing_field(campaign, skipped, editing_brief=editing_brief)
+    next_field = next_missing_field(
+        campaign,
+        skipped,
+        editing_brief=editing_brief,
+        follow_up_delay=follow_up_delay,
+        wants_follow_up=wants_follow_up,
+        email_length=email_length,
+    )
     if next_field:
         sections.append(_follow_up_question(next_field))
     elif editing_brief:
@@ -382,8 +462,7 @@ def build_collection_reply(
         if assumptions:
             sections.append(assumptions)
         sections.append(
-            "Would you like me to customize any of these before generating the campaign? "
-            "Share updates in chat, or say continue when you're ready.",
+            "Would you like me to customize any of these before generating the campaign?"
         )
     else:
         sections.append("Perfect. I now have enough information to build your campaign.")
@@ -391,13 +470,28 @@ def build_collection_reply(
     return "\n\n".join(sections)
 
 
-def _step_summary_label(step: WorkflowStep) -> str:
+def _step_summary_label(
+    step: WorkflowStep,
+    *,
+    follow_up_delay: FollowUpDelay | None = None,
+) -> str:
     if step.type == "send_email":
         return step.name or "Send Email"
     if step.type == "wait":
-        days = step.days or 3
-        day_word = "Day" if days == 1 else "Days"
-        return f"Wait {days} {day_word}"
+        if step.value is not None and step.unit is not None:
+            return format_wait_label(FollowUpDelay(value=step.value, unit=step.unit))
+        if follow_up_delay is not None:
+            return format_wait_label(follow_up_delay)
+        if step.days is not None:
+            day_word = "Day" if step.days == 1 else "Days"
+            return f"Wait {step.days} {day_word}"
+        return "Wait"
+    if step.type == "reply_condition":
+        return "Reply?"
+    if step.type == "interested_branch":
+        return step.name or "AI Reply Agent"
+    if step.type == "no_reply_branch":
+        return "No Reply"
     if step.type == "condition" and step.condition:
         words = step.condition.replace("_", " ")
         return words[0].upper() + words[1:] + "?"
@@ -408,13 +502,19 @@ def _step_summary_label(step: WorkflowStep) -> str:
 
 def build_workflow_summary(definition: WorkflowDefinition) -> str:
     """Text diagram of the workflow for chat (spec Workflow Generation UX)."""
+    delay = definition.follow_up_delay
     steps = definition.steps
     if not steps:
         return "Workflow Summary\n(No steps yet)"
 
     lines: list[str] = ["Workflow Summary", ""]
     condition_index = next(
-        (i for i, s in enumerate(steps) if s.type == "condition"),
+        (
+            i
+            for i, s in enumerate(steps)
+            if s.type == "reply_condition"
+            or (s.type == "condition" and s.condition == "reply_received")
+        ),
         -1,
     )
 
@@ -422,9 +522,17 @@ def build_workflow_summary(definition: WorkflowDefinition) -> str:
         before = steps[:condition_index]
         condition_step = steps[condition_index]
         after = steps[condition_index + 1 :]
-        yes_steps = [s for s in after if s.branch == "yes"]
-        no_steps = [s for s in after if s.branch == "no"]
-        unbranched = [s for s in after if not s.branch]
+        uses_generation = any(
+            s.type in ("interested_branch", "no_reply_branch") for s in after
+        )
+        if uses_generation:
+            yes_steps = [s for s in after if s.type == "interested_branch"]
+            no_steps = [s for s in after if s.type == "send_email"]
+            unbranched: list[WorkflowStep] = []
+        else:
+            yes_steps = [s for s in after if s.branch == "yes"]
+            no_steps = [s for s in after if s.branch == "no"]
+            unbranched = [s for s in after if not s.branch]
 
         if not yes_steps and unbranched:
             yes_steps = [unbranched[0]]
@@ -436,21 +544,27 @@ def build_workflow_summary(definition: WorkflowDefinition) -> str:
         for i, step in enumerate(before):
             if i > 0:
                 lines.append("↓")
-            lines.append(_step_summary_label(step))
+            lines.append(_step_summary_label(step, follow_up_delay=delay))
 
         if before:
             lines.append("↓")
-        lines.append(_step_summary_label(condition_step))
+        lines.append(_step_summary_label(condition_step, follow_up_delay=delay))
         lines.append("")
         if yes_steps:
-            lines.append("├─ Yes → " + " → ".join(_step_summary_label(s) for s in yes_steps))
+            lines.append(
+                "├─ Yes → "
+                + " → ".join(_step_summary_label(s, follow_up_delay=delay) for s in yes_steps)
+            )
         if no_steps:
-            lines.append("└─ No → " + " → ".join(_step_summary_label(s) for s in no_steps))
+            lines.append(
+                "└─ No → "
+                + " → ".join(_step_summary_label(s, follow_up_delay=delay) for s in no_steps)
+            )
     else:
         for i, step in enumerate(steps):
             if i > 0:
                 lines.append("↓")
-            lines.append(_step_summary_label(step))
+            lines.append(_step_summary_label(step, follow_up_delay=delay))
 
     return "\n".join(lines)
 

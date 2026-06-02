@@ -1,16 +1,22 @@
 from dataclasses import dataclass
 
-from app.langgraph.state import CampaignState
+from app.langgraph.state import ConversationState
 from app.repositories.conversation_repository import conversation_repository
 from app.repositories.workflow_repository import workflow_repository
 from app.schemas.requests import (
     CampaignBriefFieldData,
     CampaignDraftData,
     GeneratedEmailData,
+    RecipientCountsData,
+    RecipientItemData,
     WorkflowDefinitionData,
     WorkflowSessionData,
 )
+from app.services.recipient_service import _emails_from_state_recipients
+from app.services.email_service import EmailService
 from app.core.workflow_ids import assert_valid_workflow_id
+from app.services.conversation_state_service import empty_conversation_state
+from app.services.persistence import save_conversation_state
 from app.services.workflow_state_response import (
     brief_from_state,
     email_from_step_dict,
@@ -18,28 +24,11 @@ from app.services.workflow_state_response import (
 )
 
 
-def empty_campaign_state(*, user_id: str, workflow_id: str) -> CampaignState:
-    return CampaignState(
-        workflow_id=workflow_id,
-        user_id=user_id,
-        messages=[],
-        campaign_name=None,
-        business_goal=None,
-        product_info=None,
-        audience=None,
-        tone=None,
-        cta=None,
-        landing_page=None,
-        product_image=None,
-        brief_status=None,
-        brief_approved=False,
-        campaign_brief=None,
-        workflow=None,
-        skipped_fields=[],
-    )
+def empty_campaign_state(*, user_id: str, workflow_id: str) -> ConversationState:
+    return empty_conversation_state(user_id=user_id, workflow_id=workflow_id)
 
 
-def _campaign_draft_from_state(state: CampaignState) -> CampaignDraftData:
+def _campaign_draft_from_state(state: ConversationState) -> CampaignDraftData:
     return CampaignDraftData(
         campaign_name=state.get("campaign_name"),
         business_goal=state.get("business_goal"),
@@ -54,7 +43,7 @@ def _campaign_draft_from_state(state: CampaignState) -> CampaignDraftData:
     )
 
 
-def _generated_emails_from_state(state: CampaignState) -> list[GeneratedEmailData]:
+def _generated_emails_from_state(state: ConversationState) -> list[GeneratedEmailData]:
     raw = state.get("workflow")
     if not raw or not isinstance(raw, dict):
         return []
@@ -91,7 +80,7 @@ class WorkflowSessionService:
         if record is None:
             return None
 
-        state = await conversation_repository.get_campaign_state(user_id, workflow_id)
+        state = await conversation_repository.get_conversation_state(user_id, workflow_id)
         if state is None:
             return WorkflowSessionResult(
                 session=WorkflowSessionData(
@@ -101,6 +90,8 @@ class WorkflowSessionService:
                     brief_status=None,
                     workflow=None,
                     generated_emails=[],
+                    recipients=[],
+                    recipient_counts=RecipientCountsData(validCount=0, invalidCount=0),
                 ),
                 found=True,
             )
@@ -108,6 +99,29 @@ class WorkflowSessionService:
         workflow_data = workflow_from_state(state)
         brief_data = brief_from_state(state)
         messages = list(state.get("messages") or [])
+
+        recipient_emails = _emails_from_state_recipients(state.get("recipients"))
+        workflow_raw = state.get("workflow")
+        if isinstance(workflow_raw, dict):
+            recipient_emails = list(
+                dict.fromkeys(
+                    [
+                        *recipient_emails,
+                        *EmailService._extract_recipients(workflow_raw),
+                    ],
+                ),
+            )
+        if (
+            not recipient_emails
+            and record.workflow_definition
+            and isinstance(record.workflow_definition, dict)
+        ):
+            recipient_emails = EmailService._extract_recipients(record.workflow_definition)
+
+        recipient_items = [
+            RecipientItemData(email=email)
+            for email in recipient_emails
+        ]
 
         return WorkflowSessionResult(
             session=WorkflowSessionData(
@@ -123,6 +137,11 @@ class WorkflowSessionService:
                 brief_status=state.get("brief_status"),
                 workflow=workflow_data,
                 generated_emails=_generated_emails_from_state(state),
+                recipients=recipient_items,
+                recipient_counts=RecipientCountsData(
+                    validCount=len(recipient_emails),
+                    invalidCount=0,
+                ),
             ),
             found=True,
         )
@@ -134,7 +153,7 @@ class WorkflowSessionService:
         workflow_id: str,
     ) -> None:
         assert_valid_workflow_id(workflow_id)
-        await conversation_repository.upsert_campaign_state(
+        await save_conversation_state(
             user_id,
             workflow_id,
             empty_campaign_state(user_id=user_id, workflow_id=workflow_id),
