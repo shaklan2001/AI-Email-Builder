@@ -32,9 +32,9 @@ export function DashboardEmptyState() {
         </Box>
 
         <Stack spacing={1}>
-          <Typography variant="h6">No workflows yet</Typography>
+          <Typography variant="h6">No campaigns yet</Typography>
           <Typography variant="body2" color="text.secondary">
-            Create your first workflow to start building AI-powered email campaigns.
+            Create your first campaign and let the AI sales agent build outreach for you.
           </Typography>
         </Stack>
 
