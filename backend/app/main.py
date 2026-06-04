@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat, email, recipients, review, workflows
+from app.api import chat, email, recipients, review, webhooks, workflows
 from app.core.config import settings
 from app.core.database import close_db, connect_db
+from app.core.redis_client import ping_redis
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logger import setup_logging
 
@@ -42,10 +43,15 @@ def create_app() -> FastAPI:
     app.include_router(recipients.router, prefix="/api/v1/recipients", tags=["recipients"])
     app.include_router(review.router, prefix="/api/v1/review", tags=["review"])
     app.include_router(email.router, prefix="/api/v1/email", tags=["email"])
+    app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"])
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        redis_ok = await ping_redis()
+        return {
+            "status": "ok",
+            "redis": "connected" if redis_ok else "unavailable",
+        }
 
     return app
 

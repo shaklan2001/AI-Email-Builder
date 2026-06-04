@@ -14,5 +14,7 @@ class EmailProvider(ABC):
         html_content: str,
         plain_text_content: str,
         recipients: list[str],
+        workflow_id: str | None = None,
+        lead_id: str | None = None,
     ) -> str:
-        """Send an email to the given recipients. Returns the provider message id."""
+        """Send an email. Returns the provider message id (one id per API call)."""

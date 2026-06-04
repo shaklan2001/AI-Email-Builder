@@ -5,16 +5,29 @@ from fastapi import HTTPException, status
 from app.providers.email.base import EmailProvider, EmailProviderError
 from app.providers.email.resend_provider import get_resend_provider
 from app.repositories.conversation_repository import conversation_repository
+from app.repositories.email_message_repository import (
+    EmailMessageRepository,
+    email_message_repository,
+)
 from app.repositories.workflow_repository import workflow_repository
 from app.schemas.email import EmailBodyVersion, GeneratedEmailContent
+from app.schemas.email_message import BulkSendEmailResult, SendEmailResult
 from app.schemas.requests import EmailSendStatusData
+from app.services.analytics_service import AnalyticsService, analytics_service
 
 _EMAIL_REGEX = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 class EmailService:
-    def __init__(self, email_provider: EmailProvider | None = None) -> None:
+    def __init__(
+        self,
+        email_provider: EmailProvider | None = None,
+        analytics: AnalyticsService | None = None,
+        message_repository: EmailMessageRepository | None = None,
+    ) -> None:
         self._email_provider = email_provider
+        self._analytics_service = analytics or analytics_service
+        self._message_repository = message_repository or email_message_repository
 
     def _provider(self) -> EmailProvider:
         if self._email_provider is not None:
@@ -130,6 +143,118 @@ class EmailService:
             detail="Workflow not found",
         )
 
+    async def send_email(
+        self,
+        *,
+        workflow_id: str,
+        lead_id: str,
+        subject: str,
+        html_content: str,
+        plain_text_content: str,
+        step_id: str | None = None,
+    ) -> SendEmailResult:
+        """Send one email to a single lead via Resend; persist message id and tracking."""
+        lead_email = lead_id.strip()
+        if not _EMAIL_REGEX.match(lead_email):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid lead email: {lead_id}",
+            )
+
+        try:
+            message_id = await self._provider().send_email(
+                subject=subject,
+                html_content=html_content,
+                plain_text_content=plain_text_content,
+                recipients=[lead_email],
+                workflow_id=workflow_id,
+                lead_id=lead_email,
+            )
+        except EmailProviderError as exc:
+            await self._message_repository.create_failed(
+                workflow_id=workflow_id,
+                lead_id=lead_email,
+                step_id=step_id,
+            )
+            try:
+                await self._analytics_service.record_failed(workflow_id)
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+
+        await self._message_repository.create_sent(
+            resend_message_id=message_id,
+            workflow_id=workflow_id,
+            lead_id=lead_email,
+            step_id=step_id,
+        )
+        await self._analytics_service.record_sent(workflow_id)
+
+        return SendEmailResult(
+            resend_message_id=message_id,
+            workflow_id=workflow_id,
+            lead_id=lead_email,
+            step_id=step_id,
+        )
+
+    async def send_bulk_email(
+        self,
+        *,
+        workflow_id: str,
+        lead_ids: list[str],
+        subject: str,
+        html_content: str,
+        plain_text_content: str,
+        step_id: str | None = None,
+    ) -> BulkSendEmailResult:
+        """Send the same email to multiple leads; one Resend message id per lead."""
+        validated = self.validate_recipients(lead_ids)
+        results: list[SendEmailResult] = []
+        failed_count = 0
+
+        for lead_email in validated:
+            try:
+                result = await self.send_email(
+                    workflow_id=workflow_id,
+                    lead_id=lead_email,
+                    subject=subject,
+                    html_content=html_content,
+                    plain_text_content=plain_text_content,
+                    step_id=step_id,
+                )
+                results.append(result)
+            except HTTPException:
+                failed_count += 1
+
+        if not results and failed_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="All bulk email sends failed",
+            )
+
+        message_ids = [r.resend_message_id for r in results]
+        return BulkSendEmailResult(
+            sent_count=len(results),
+            failed_count=failed_count,
+            results=results,
+            message_ids=message_ids,
+        )
+
+    async def record_delivery_event(
+        self,
+        *,
+        resend_message_id: str,
+        event_type: str,
+    ) -> None:
+        """Update per-message tracking from Resend webhooks."""
+        await self._message_repository.apply_tracking_event(
+            resend_message_id,
+            event=event_type,
+        )
+
     async def send_workflow_email(
         self,
         *,
@@ -155,26 +280,22 @@ class EmailService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Workflow has no recipients",
             )
-        recipients = self.validate_recipients(raw_recipients)
 
-        try:
-            provider = self._provider()
-            message_id = await provider.send_email(
-                subject=body.subject,
-                html_content=body.html_content,
-                plain_text_content=body.plain_text_content,
-                recipients=recipients,
-            )
-        except EmailProviderError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=str(exc),
-            ) from exc
+        bulk = await self.send_bulk_email(
+            workflow_id=workflow_id,
+            lead_ids=raw_recipients,
+            subject=body.subject,
+            html_content=body.html_content,
+            plain_text_content=body.plain_text_content,
+            step_id=step_id,
+        )
 
+        first_id = bulk.message_ids[0] if bulk.message_ids else None
         return EmailSendStatusData(
             status="sent",
-            message_id=message_id,
-            recipient_count=len(recipients),
+            message_id=first_id,
+            message_ids=bulk.message_ids,
+            recipient_count=bulk.sent_count,
             step_id=step_id,
         )
 

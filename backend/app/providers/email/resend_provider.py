@@ -16,6 +16,8 @@ class ResendProvider(EmailProvider):
         html_content: str,
         plain_text_content: str,
         recipients: list[str],
+        workflow_id: str | None = None,
+        lead_id: str | None = None,
     ) -> str:
         resend.api_key = self._api_key
         params: resend.Emails.SendParams = {
@@ -25,6 +27,8 @@ class ResendProvider(EmailProvider):
             "html": html_content,
             "text": plain_text_content,
         }
+        # Tracking uses email_messages (workflow_id, lead_id). Resend tags reject emails
+        # in values (e.g. user@domain.com) and caused 422 failures in production.
         try:
             response = await resend.Emails.send_async(params)
         except Exception as exc:
