@@ -48,10 +48,17 @@ Workflow activation should enqueue jobs.
 
 Workers should process execution.
 
+**Full activation flow** (version snapshot, `activated_at`, execution records): `36-workflow-activation.md`.
+
+**Execution engine** (step logic, wait/follow-up): `20-workflow-execution-engine.md`.
+
+**Prerequisite:** review approval — `35-workflow-review-stage.md`.
+
 ## Check When Done
 
 - Redis connected
 - Celery running
-- Jobs enqueue correctly
+- Jobs enqueue correctly on activate
 - Workers process jobs
+- Activation API documented in spec 36
 - No type errors
