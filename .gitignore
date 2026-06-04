@@ -26,6 +26,9 @@ backend/.ruff_cache/
 frontend/node_modules/
 frontend/dist/
 
+# Local tooling (history rebuild, etc.)
+scripts/
+
 # IDE / local
 .cursor/
 *.log
