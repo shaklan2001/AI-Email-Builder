@@ -49,10 +49,16 @@ Store:
 
 Prevent duplicate processing.
 
+When webhook payload includes `email_id`, call `EmailService.record_delivery_event` to update `email_messages` tracking (see `19-resend-email.md`).
+
+On `replied` events, also run reply handling (`37-reply-handling.md`): LangGraph intent classification, `inbound_replies` insert, and lead upsert. Response includes `reply_classified`, `reply_intent`, and `lead_updated`.
+
 ## Check When Done
 
 - Webhooks received
 - Signature validated
 - Events stored
+- Per-message tracking updated when `email_id` present
 - Workflow updates correctly
+- Reply classified and lead updated on `replied`
 - No duplicate processing
