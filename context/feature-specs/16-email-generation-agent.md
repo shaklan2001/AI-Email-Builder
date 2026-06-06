@@ -20,7 +20,9 @@ Create:
 
 agents/
 
-copywriter_agent.py
+email_generation_agent.py
+
+copywriter_agent.py  (alias / re-export of email generation agent)
 
 Responsibilities:
 
@@ -38,17 +40,29 @@ Output Example:
 
 Generate email content for all email steps in the workflow.
 
-Store generated content in workflow state.
+Store generated content in:
 
-Expose generated emails through API.
+- Workflow steps (`email` on each `send_email` step — `GeneratedEmailContent` with AI + final versions)
+- MongoDB `email_templates` via `email_template_repository`
+- Conversation state / `persistence.py`
 
-Update frontend preview.
+Email types: promotional (initial), follow-up, reply (inferred via `email_type.py`).
+
+After generation, set `review_status: pending` for review stage (`35-workflow-review-stage.md`).
+
+Expose generated emails through chat API workflow preview.
+
+Update frontend preview (`workflow-preview.tsx`, `email-review-panel.tsx`).
+
+**Tests**
+
+- `backend/tests/test_email_generation_agent.py`
 
 ## Check When Done
 
 - Email generation works
-- Subject generated
-- HTML generated
-- Plain text generated
-- Workflow state updated
+- Subject, HTML, and plain text generated
+- Workflow state and `email_templates` updated in MongoDB
 - Frontend preview updated
+- Review stage reachable after emails
+- No type errors
