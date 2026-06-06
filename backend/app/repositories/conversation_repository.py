@@ -59,7 +59,7 @@ class ConversationRepository:
         for field in PERSISTED_STATE_FIELDS:
             if field in doc and field not in ("campaign_id", "thread_id"):
                 state[field] = doc[field]  # type: ignore[literal-required]
-        return state
+        return sanitize_loaded_state(state)
 
     def _state_to_doc(
         self,

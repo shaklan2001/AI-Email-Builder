@@ -260,7 +260,6 @@ class EmailService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Workflow has no recipients",
             )
-        recipients = self.validate_recipients(raw_recipients)
 
         message_ids: list[str] = []
         for recipient in recipients:
@@ -274,6 +273,7 @@ class EmailService:
             )
             message_ids.append(result.resend_message_id)
 
+        first_id = bulk.message_ids[0] if bulk.message_ids else None
         return EmailSendStatusData(
             status="sent",
             message_id=message_ids[0] if message_ids else None,

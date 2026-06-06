@@ -105,6 +105,50 @@ class WorkflowRepository:
             {"$set": {"name": name.strip(), "updated_at": now}},
         )
 
+    async def update_status(
+        self,
+        *,
+        user_id: str,
+        workflow_id: str,
+        status: str,
+    ) -> WorkflowRecord | None:
+        now = datetime.now(UTC)
+        result = await get_database()[self.COLLECTION].find_one_and_update(
+            {"_id": workflow_id, "user_id": user_id},
+            {"$set": {"status": status, "updated_at": now}},
+            return_document=True,
+        )
+        if result is None:
+            return None
+        return self._doc_to_record(result)
+
+    async def activate(
+        self,
+        *,
+        user_id: str,
+        workflow_id: str,
+        active_version: int,
+        workflow_definition: dict[str, Any] | None = None,
+        activated_at: datetime | None = None,
+    ) -> WorkflowRecord | None:
+        now = activated_at or datetime.now(UTC)
+        update_fields: dict[str, Any] = {
+            "status": "active",
+            "updated_at": now,
+            "activated_at": now,
+            "active_version": active_version,
+        }
+        if workflow_definition is not None:
+            update_fields["workflow_definition"] = workflow_definition
+        result = await get_database()[self.COLLECTION].find_one_and_update(
+            {"_id": workflow_id, "user_id": user_id},
+            {"$set": update_fields},
+            return_document=True,
+        )
+        if result is None:
+            return None
+        return self._doc_to_record(result)
+
     async def upsert_workflow_definition(
         self,
         *,

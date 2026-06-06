@@ -21,6 +21,7 @@ from app.schemas.requests import (
     WorkflowDefinitionData,
     WorkflowSessionData,
 )
+from app.services.recipient_service import recipient_service
 from app.schemas.responses import SuccessResponse
 from app.services.recipient_service import recipient_service
 from app.services.workflow_activation_service import workflow_activation_service

@@ -17,4 +17,4 @@ class EmailProvider(ABC):
         reply_to: str | None = None,
         tags: dict[str, str] | None = None,
     ) -> str:
-        """Send an email to the given recipients. Returns the provider message id."""
+        """Send an email. Returns the provider message id (one id per API call)."""
