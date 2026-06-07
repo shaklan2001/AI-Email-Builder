@@ -1,4 +1,5 @@
 import { apiClient } from "../api/client";
+import type { ApiRequestOptions } from "../api/request-options";
 import { parseWorkflowDefinition } from "../lib/parse-workflow-definition";
 import type { BriefStatus, CampaignBrief } from "../types/campaign-brief";
 import type { ReviewStatus } from "../types/workflow-review";
@@ -106,9 +107,13 @@ export async function sendMessage(
   return mapChatPayload(response.data);
 }
 
-export async function fetchChatThread(threadId: string): Promise<ChatThreadPayload> {
+export async function fetchChatThread(
+  threadId: string,
+  options?: ApiRequestOptions,
+): Promise<ChatThreadPayload> {
   const response = await apiClient<SuccessResponse<RawThreadData>>(
     `/api/chat/thread/${encodeURIComponent(threadId)}`,
+    options,
   );
   return mapThreadPayload(response.data);
 }

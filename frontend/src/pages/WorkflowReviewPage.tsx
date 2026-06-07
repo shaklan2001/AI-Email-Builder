@@ -1,10 +1,9 @@
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
-import CircularProgress from "@mui/material/CircularProgress";
 import Container from "@mui/material/Container";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { WorkflowReview } from "../components/review/workflow-review";
@@ -12,13 +11,12 @@ import {
   REVIEW_EDIT_CAMPAIGN_MESSAGE,
   REVIEW_REGENERATE_MESSAGE,
 } from "../components/builder/workflow-review-panel";
+import { QueryState, ReviewPageSkeleton } from "../components/common";
 import { queryKeys } from "../api/queryKeys";
 import { campaignBuilderPath } from "../lib/campaign-routes";
+import { useWorkflowReview } from "../hooks/use-workflow-review";
 import { getMockWorkflowReview } from "../mocks/workflow-review";
-import {
-  approveWorkflowReview,
-  fetchWorkflowReview,
-} from "../services/review.service";
+import { approveWorkflowReview } from "../services/review.service";
 import { sendMessage } from "../services/chat.service";
 import { activateWorkflow } from "../services/workflow.service";
 
@@ -27,11 +25,7 @@ export function WorkflowReviewPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["workflow-review", workflowId],
-    queryFn: () => fetchWorkflowReview(workflowId!),
-    enabled: Boolean(workflowId),
-  });
+  const { data, isLoading, isError, error } = useWorkflowReview(workflowId);
 
   const approveMutation = useMutation({
     mutationFn: () => approveWorkflowReview(workflowId!),
@@ -71,36 +65,11 @@ export function WorkflowReviewPage() {
     );
   }
 
-  if (isLoading) {
-    return (
-      <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (isError || !data) {
-    return (
-      <Container maxWidth="md" sx={{ py: 4 }}>
-        <Alert severity="error">
-          {error instanceof Error ? error.message : "Could not load workflow review."}
-        </Alert>
-      </Container>
-    );
-  }
-
-  const mockExtras = getMockWorkflowReview(workflowId);
-  const reviewData = {
-    ...data,
-    leadStatusCounts: data.leadStatusCounts ?? mockExtras.leadStatusCounts,
-    leadDetails: data.leadDetails ?? mockExtras.leadDetails,
-  };
-
   return (
-    <Container maxWidth="md" sx={{ py: { xs: 3, sm: 4 } }}>
+    <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 3 } }}>
       <Stack spacing={4}>
         <Box>
-          <Typography variant="h5" component="h1" gutterBottom>
+          <Typography variant="h4" component="h1" gutterBottom>
             Workflow Review
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -108,23 +77,42 @@ export function WorkflowReviewPage() {
           </Typography>
         </Box>
 
-        {!data.activationAllowed && data.reviewStatus !== "approved" && (
-          <Alert severity="info">
-            Activation is locked until you approve this workflow.
-          </Alert>
-        )}
+        <QueryState
+          loading={isLoading}
+          isError={isError || !data}
+          error={error}
+          loadingFallback={<ReviewPageSkeleton />}
+          errorFallbackMessage="Could not load workflow review."
+        >
+          {data && (
+            <>
+              {!data.activationAllowed && data.reviewStatus !== "approved" && (
+                <Alert severity="info">
+                  Activation is locked until you approve this workflow.
+                </Alert>
+              )}
 
-        <WorkflowReview
-          data={reviewData}
-          onLooksGood={() => approveMutation.mutate()}
-          onEditCampaign={() => chatAction(REVIEW_EDIT_CAMPAIGN_MESSAGE)}
-          onRegenerate={() => chatAction(REVIEW_REGENERATE_MESSAGE)}
-          onActivate={
-            data.activationAllowed ? () => activateMutation.mutate() : undefined
-          }
-          actionsDisabled={approveMutation.isPending || activateMutation.isPending}
-          approveLoading={approveMutation.isPending}
-        />
+              <WorkflowReview
+                data={{
+                  ...data,
+                  leadStatusCounts:
+                    data.leadStatusCounts ??
+                    getMockWorkflowReview(workflowId).leadStatusCounts,
+                  leadDetails:
+                    data.leadDetails ?? getMockWorkflowReview(workflowId).leadDetails,
+                }}
+                onLooksGood={() => approveMutation.mutate()}
+                onEditCampaign={() => chatAction(REVIEW_EDIT_CAMPAIGN_MESSAGE)}
+                onRegenerate={() => chatAction(REVIEW_REGENERATE_MESSAGE)}
+                onActivate={
+                  data.activationAllowed ? () => activateMutation.mutate() : undefined
+                }
+                actionsDisabled={approveMutation.isPending || activateMutation.isPending}
+                approveLoading={approveMutation.isPending}
+              />
+            </>
+          )}
+        </QueryState>
       </Stack>
     </Container>
   );

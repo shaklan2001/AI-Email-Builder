@@ -18,7 +18,8 @@ export function parseWorkflowDefinition(
   const parsedDelay =
     followUpDelay &&
     typeof followUpDelay.value === "number" &&
-    (followUpDelay.unit === "hours" ||
+    (followUpDelay.unit === "minutes" ||
+      followUpDelay.unit === "hours" ||
       followUpDelay.unit === "days" ||
       followUpDelay.unit === "weeks")
       ? followUpDelay

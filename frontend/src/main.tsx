@@ -1,11 +1,10 @@
 import { ClerkProvider } from "@clerk/clerk-react";
-import CssBaseline from "@mui/material/CssBaseline";
-import { ThemeProvider } from "@mui/material/styles";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "simplebar-react/dist/simplebar.min.css";
 import App from "./App";
 import { QueryProvider } from "./providers/QueryProvider";
-import { muiTheme } from "./theme/muiTheme";
+import ThemeProvider from "./theme";
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -24,8 +23,7 @@ createRoot(document.getElementById("root")!).render(
       afterSignOutUrl="/sign-in"
     >
       <QueryProvider>
-        <ThemeProvider theme={muiTheme}>
-          <CssBaseline />
+        <ThemeProvider>
           <App />
         </ThemeProvider>
       </QueryProvider>

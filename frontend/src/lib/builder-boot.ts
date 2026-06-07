@@ -52,6 +52,33 @@ function messagesFromChatThread(
   return messagesFromRows(thread.messages, "thread");
 }
 
+function bootFromPendingFirstPrompt(firstPrompt: string): BuilderBootState {
+  const trimmed = firstPrompt.trim();
+  return {
+    stage: "builder",
+    firstPrompt: trimmed,
+    showPrompt: false,
+    showBuilder: true,
+    initialMessages: [
+      {
+        id: "pending-first-prompt",
+        role: "user",
+        content: trimmed,
+      },
+    ],
+    initialWorkflowDefinition: null,
+    initialCampaignBrief: null,
+    initialBriefStatus: null,
+    initialReviewStatus: null,
+    initialActivationAllowed: false,
+    campaign: {
+      firstPrompt: trimmed,
+      builderStage: "builder",
+    },
+    layoutKey: 0,
+  };
+}
+
 function bootFromChatThread(
   thread: ChatThreadPayload,
   startAtPrompt: boolean,
@@ -189,10 +216,15 @@ function hydrateRecipientsFromDraft(workflowId: string): void {
 
 export function buildBuilderBoot(
   workflowId: string,
-  options: { startAtPrompt: boolean },
+  options: { startAtPrompt: boolean; pendingFirstPrompt?: string | null },
   session?: WorkflowSession | null,
   chatThread?: ChatThreadPayload | null,
 ): BuilderBootState {
+  const pendingFirstPrompt = options.pendingFirstPrompt?.trim();
+  if (pendingFirstPrompt) {
+    return bootFromPendingFirstPrompt(pendingFirstPrompt);
+  }
+
   hydrateRecipientsFromDraft(workflowId);
 
   // MongoDB conversation state is the source of truth (spec 33).

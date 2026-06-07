@@ -1,4 +1,5 @@
 import { apiClient } from "../api/client";
+import type { ApiRequestOptions } from "../api/request-options";
 import type { WorkflowReviewData } from "../types/workflow-review";
 
 interface SuccessResponse<T> {
@@ -8,9 +9,11 @@ interface SuccessResponse<T> {
 
 export async function fetchWorkflowReview(
   workflowId: string,
+  options?: ApiRequestOptions,
 ): Promise<WorkflowReviewData> {
   const response = await apiClient<SuccessResponse<WorkflowReviewData>>(
     `/api/v1/review/${workflowId}`,
+    options,
   );
   return response.data;
 }

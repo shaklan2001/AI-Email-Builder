@@ -1,4 +1,5 @@
 import { apiClient } from "../api/client";
+import type { ApiRequestOptions } from "../api/request-options";
 import type {
   ConversationMessageType,
   ConversationThreadMessage,
@@ -55,10 +56,14 @@ function normalizeThread(raw: {
 
 export async function fetchConversationThreadPreview(
   campaignId: string,
+  options?: ApiRequestOptions,
 ): Promise<ConversationThreadSummary | null> {
   const response = await apiClient<
     SuccessResponse<ConversationThreadSummary | null>
-  >(`/api/v1/workflows/${encodeURIComponent(campaignId)}/conversation-threads/preview`);
+  >(
+    `/api/v1/workflows/${encodeURIComponent(campaignId)}/conversation-threads/preview`,
+    options,
+  );
 
   if (!response.data) {
     return null;

@@ -2,6 +2,10 @@ import type { FollowUpDelay } from "../types/follow-up-delay";
 import type { WorkflowDefinition, WorkflowStep } from "../types/workflow-definition";
 
 export function formatWaitLabel(delay: FollowUpDelay): string {
+  if (delay.unit === "minutes") {
+    const label = delay.value === 1 ? "Minute" : "Minutes";
+    return `Wait ${delay.value} ${label}`;
+  }
   if (delay.unit === "hours") {
     const label = delay.value === 1 ? "Hour" : "Hours";
     return `Wait ${delay.value} ${label}`;
@@ -21,7 +25,10 @@ export function waitLabelForStep(
   if (
     step.type === "wait" &&
     step.value != null &&
-    (step.unit === "hours" || step.unit === "days" || step.unit === "weeks")
+    (step.unit === "minutes" ||
+      step.unit === "hours" ||
+      step.unit === "days" ||
+      step.unit === "weeks")
   ) {
     return formatWaitLabel({ value: step.value, unit: step.unit });
   }

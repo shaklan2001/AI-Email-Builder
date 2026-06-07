@@ -1,4 +1,5 @@
 import { apiClient } from "../api/client";
+import type { ApiRequestOptions } from "../api/request-options";
 import { parseWorkflowDefinition } from "../lib/parse-workflow-definition";
 import type { BriefStatus, CampaignBrief } from "../types/campaign-brief";
 import type { Recipient, RecipientCounts } from "../types/recipient";
@@ -69,9 +70,10 @@ function normalizeWorkflowRecord(
   };
 }
 
-export async function fetchWorkflows(): Promise<WorkflowRecord[]> {
+export async function fetchWorkflows(options?: ApiRequestOptions): Promise<WorkflowRecord[]> {
   const response = await apiClient<SuccessResponse<WorkflowRecord[]>>(
     "/api/v1/workflows",
+    options,
   );
   return (response.data ?? []).map((item) =>
     normalizeWorkflowRecord(item as WorkflowRecord & { created_at?: string }),
@@ -194,9 +196,13 @@ export async function deleteWorkflow(workflowId: string): Promise<DeleteWorkflow
   };
 }
 
-export async function fetchWorkflowSession(workflowId: string): Promise<WorkflowSession> {
+export async function fetchWorkflowSession(
+  workflowId: string,
+  options?: ApiRequestOptions,
+): Promise<WorkflowSession> {
   const response = await apiClient<SuccessResponse<WorkflowSession>>(
     `/api/v1/workflows/${workflowId}/session`,
+    options,
   );
   const data = response.data;
   const rawWorkflow = data.workflow as

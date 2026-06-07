@@ -1,11 +1,13 @@
 import Box from "@mui/material/Box";
-import CircularProgress from "@mui/material/CircularProgress";
+import { mainContentHeight } from "src/layouts/config-layout";
 import Fade from "@mui/material/Fade";
 import Typography from "@mui/material/Typography";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { campaignBuilderPath } from "../lib/campaign-routes";
 import { AiPromptScreen } from "../components/builder/ai-prompt-screen";
 import { BuilderLayout } from "../components/builder/BuilderLayout";
+import { BuilderPageSkeleton } from "../components/common";
 import type { ChatMessage } from "../components/chat/types";
 import { useInvalidateWorkflowQueries } from "../hooks/use-invalidate-workflow-queries";
 import { useChatThread } from "../hooks/use-chat-thread";
@@ -50,12 +52,24 @@ function applyBoot(
   setters.setLayoutKey((k) => k + 1);
 }
 
+type BuilderLocationState = {
+  isNew?: boolean;
+  firstPrompt?: string;
+};
+
 export function WorkflowBuilderPage() {
   const { workflowId } = useParams<{ workflowId: string }>();
   const location = useLocation();
-  const startAtPrompt = Boolean(
-    (location.state as { isNew?: boolean } | null)?.isNew,
-  );
+  const navigate = useNavigate();
+  const locationState = location.state as BuilderLocationState | null;
+  const pendingFirstPrompt = locationState?.firstPrompt ?? null;
+  const pendingPromptConsumedRef = useRef(false);
+  const effectivePendingFirstPrompt =
+    pendingPromptConsumedRef.current || !pendingFirstPrompt?.trim()
+      ? null
+      : pendingFirstPrompt;
+  const startAtPrompt =
+    Boolean(locationState?.isNew) && !effectivePendingFirstPrompt?.trim();
   const invalidateWorkflowQueries = useInvalidateWorkflowQueries();
 
   const { data: chatThread, isFetched: chatThreadFetched } = useChatThread(workflowId);
@@ -70,11 +84,18 @@ export function WorkflowBuilderPage() {
     }
     return buildBuilderBoot(
       workflowId,
-      { startAtPrompt },
+      { startAtPrompt, pendingFirstPrompt: effectivePendingFirstPrompt },
       session ?? null,
       chatThread ?? null,
     );
-  }, [workflowId, startAtPrompt, session, chatThread, chatThreadFetched]);
+  }, [
+    workflowId,
+    startAtPrompt,
+    effectivePendingFirstPrompt,
+    session,
+    chatThread,
+    chatThreadFetched,
+  ]);
 
   const [stage, setStage] = useState<BuilderStage>(() => boot?.stage ?? "builder");
   const [firstPrompt, setFirstPrompt] = useState<string | null>(
@@ -111,6 +132,22 @@ export function WorkflowBuilderPage() {
       setLayoutKey,
     });
   }, [boot]);
+
+  useEffect(() => {
+    if (
+      !workflowId ||
+      !pendingFirstPrompt?.trim() ||
+      pendingPromptConsumedRef.current ||
+      !boot
+    ) {
+      return;
+    }
+
+    if (boot.firstPrompt === pendingFirstPrompt.trim()) {
+      pendingPromptConsumedRef.current = true;
+      navigate(campaignBuilderPath(workflowId), { replace: true, state: null });
+    }
+  }, [boot, pendingFirstPrompt, workflowId, navigate]);
 
   const promptInitialMessages = useMemo(
     () => (firstPrompt ? buildInitialChatMessages(firstPrompt) : undefined),
@@ -156,18 +193,7 @@ export function WorkflowBuilderPage() {
   }
 
   if (!chatThreadFetched) {
-    return (
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: "calc(100vh - 56px)",
-        }}
-      >
-        <CircularProgress size={32} />
-      </Box>
-    );
+    return <BuilderPageSkeleton />;
   }
 
   if (!boot) {
@@ -182,8 +208,12 @@ export function WorkflowBuilderPage() {
     <Box
       sx={{
         position: "relative",
-        height: "calc(100vh - 56px)",
         overflow: "hidden",
+        mx: { lg: -2 },
+        my: { lg: -2 },
+        width: { lg: "calc(100% + 32px)" },
+        height: mainContentHeight,
+        minHeight: mainContentHeight,
       }}
     >
       <Fade in={showPrompt} timeout={TRANSITION_MS} unmountOnExit>
