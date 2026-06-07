@@ -1,5 +1,7 @@
+import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { memo } from "react";
 import type { WorkflowAnalytics } from "../../services/analytics.service";
 
 interface WorkflowAnalyticsSummaryProps {
@@ -16,33 +18,40 @@ const metricLabels: Array<{ key: keyof WorkflowAnalytics; label: string }> = [
   { key: "bounced", label: "Bounced" },
 ];
 
-export function WorkflowAnalyticsSummary({ analytics }: WorkflowAnalyticsSummaryProps) {
-  const hasActivity = metricLabels.some(({ key }) => analytics[key] > 0);
-  if (!hasActivity) {
+export const WorkflowAnalyticsSummary = memo(function WorkflowAnalyticsSummary({
+  analytics,
+}: WorkflowAnalyticsSummaryProps) {
+  const activeMetrics = metricLabels.filter(({ key }) => analytics[key] > 0);
+  if (activeMetrics.length === 0) {
     return null;
   }
 
   return (
-    <Stack spacing={0.5} component="dl" sx={{ m: 0 }}>
-      <Typography variant="caption" color="text.secondary" component="dt">
+    <Stack spacing={1} component="section" aria-label="Workflow engagement metrics">
+      <Typography variant="caption" color="text.secondary" fontWeight={600}>
         Analytics
       </Typography>
-      <Stack
-        component="dd"
-        direction="row"
-        flexWrap="wrap"
-        gap={1}
-        sx={{ m: 0 }}
-        aria-label="Workflow engagement metrics"
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
+          gap: 1,
+          p: 1.5,
+          borderRadius: 1.5,
+          bgcolor: "background.neutral",
+        }}
       >
-        {metricLabels.map(({ key, label }) =>
-          analytics[key] > 0 ? (
-            <Typography key={key} variant="caption" color="text.secondary">
-              {label} {analytics[key]}
+        {activeMetrics.map(({ key, label }) => (
+          <Box key={key} sx={{ textAlign: "center", minWidth: 0 }}>
+            <Typography variant="subtitle2" component="p" sx={{ lineHeight: 1.2 }}>
+              {analytics[key]}
             </Typography>
-          ) : null,
-        )}
-      </Stack>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              {label}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
     </Stack>
   );
-}
+});

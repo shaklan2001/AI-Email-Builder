@@ -1,4 +1,5 @@
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import FormControl from "@mui/material/FormControl";
@@ -7,7 +8,7 @@ import Select from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { queryKeys } from "../../api/queryKeys";
 import {
   requeueWorkflowRuns,
@@ -22,6 +23,7 @@ import {
 
 interface WorkflowStatusControlProps {
   workflow: WorkflowRecord;
+  trailingActions?: ReactNode;
 }
 
 const DASHBOARD_STATUS_OPTIONS: Record<
@@ -36,7 +38,10 @@ const DASHBOARD_STATUS_OPTIONS: Record<
   completed: null,
 };
 
-export function WorkflowStatusControl({ workflow }: WorkflowStatusControlProps) {
+export function WorkflowStatusControl({
+  workflow,
+  trailingActions,
+}: WorkflowStatusControlProps) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -89,14 +94,17 @@ export function WorkflowStatusControl({ workflow }: WorkflowStatusControlProps) 
 
   const pending = statusMutation.isPending || requeueMutation.isPending;
 
+  const showSendButton = workflow.status === "active";
+  const showActionsRow = showSendButton || trailingActions;
+
   return (
     <Stack
-      spacing={0.5}
+      spacing={1.5}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+        <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
           Status
         </Typography>
         {canChange ? (
@@ -106,7 +114,7 @@ export function WorkflowStatusControl({ workflow }: WorkflowStatusControlProps) 
               onChange={(event) => handleStatusChange(event.target.value)}
               disabled={pending}
               aria-label={`Change status for ${workflow.name}`}
-              sx={{ height: 28 }}
+              sx={{ height: 32 }}
             >
               {options!.map((status) => (
                 <MenuItem key={status} value={status}>
@@ -123,17 +131,32 @@ export function WorkflowStatusControl({ workflow }: WorkflowStatusControlProps) 
           />
         )}
       </Stack>
-      {workflow.status === "active" && (
-        <Button
-          size="small"
-          variant="outlined"
-          disabled={pending}
-          onClick={() => requeueMutation.mutate()}
-          sx={{ alignSelf: "flex-start" }}
+
+      {showActionsRow && (
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          spacing={1}
+          flexWrap="wrap"
+          useFlexGap
         >
-          {requeueMutation.isPending ? "Sending…" : "Send pending emails"}
-        </Button>
+          <Box sx={{ display: "flex", flex: 1, minWidth: 0 }}>
+            {showSendButton && (
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={pending}
+                onClick={() => requeueMutation.mutate()}
+              >
+                {requeueMutation.isPending ? "Sending…" : "Send pending emails"}
+              </Button>
+            )}
+          </Box>
+          {trailingActions}
+        </Stack>
       )}
+
       {!canChange && workflow.status === "draft" && (
         <Typography variant="caption" color="text.secondary">
           Open the workflow to review and activate.

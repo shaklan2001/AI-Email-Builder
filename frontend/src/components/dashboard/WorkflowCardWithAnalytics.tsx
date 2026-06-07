@@ -1,7 +1,8 @@
 import Card from "@mui/material/Card";
 import CardActionArea from "@mui/material/CardActionArea";
 import CardContent from "@mui/material/CardContent";
-import CircularProgress from "@mui/material/CircularProgress";
+import Divider from "@mui/material/Divider";
+import Skeleton from "@mui/material/Skeleton";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useNavigate } from "react-router-dom";
@@ -41,35 +42,41 @@ export function WorkflowCardWithAnalytics({ workflow }: WorkflowCardWithAnalytic
 
   return (
     <Card
-      variant="outlined"
       sx={{
         height: "100%",
-        transition: "border-color 0.2s ease",
+        display: "flex",
+        flexDirection: "column",
+        transition: (theme) =>
+          theme.transitions.create(["box-shadow", "transform"], {
+            duration: theme.transitions.duration.shorter,
+          }),
         "&:hover": {
-          borderColor: "primary.main",
+          boxShadow: (theme) => theme.customShadows.z16,
+          transform: "translateY(-2px)",
         },
       }}
     >
       <CardActionArea
         onClick={() => navigate(campaignBuilderPath(workflow.id))}
-        sx={{ height: "100%", alignItems: "stretch" }}
+        sx={{ flex: 1, alignItems: "stretch" }}
       >
-        <CardContent>
+        <CardContent sx={{ pb: 2 }}>
           <Stack spacing={2}>
-            <Typography variant="h6" component="h2" noWrap>
-              {workflow.name}
-            </Typography>
-
-            <WorkflowStatusControl workflow={workflow} />
-
-            <WorkflowDeleteButton workflow={workflow} />
-
-            <Typography variant="body2" color="text.secondary">
-              Created {formatCreatedDate(workflow.createdAt)}
-            </Typography>
+            <Stack spacing={0.5}>
+              <Typography variant="subtitle1" component="h2" noWrap>
+                {workflow.name}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Created {formatCreatedDate(workflow.createdAt)}
+              </Typography>
+            </Stack>
 
             {showAnalytics && isLoading && (
-              <CircularProgress size={16} aria-label="Loading analytics" />
+              <Skeleton
+                variant="rounded"
+                height={72}
+                aria-label="Loading analytics"
+              />
             )}
             {showAnalytics && !isLoading && !isError && analytics && (
               <WorkflowAnalyticsSummary analytics={analytics} />
@@ -77,6 +84,15 @@ export function WorkflowCardWithAnalytics({ workflow }: WorkflowCardWithAnalytic
           </Stack>
         </CardContent>
       </CardActionArea>
+
+      <Divider />
+
+      <CardContent sx={{ pt: 2, "&:last-child": { pb: 3 } }}>
+        <WorkflowStatusControl
+          workflow={workflow}
+          trailingActions={<WorkflowDeleteButton workflow={workflow} />}
+        />
+      </CardContent>
     </Card>
   );
 }

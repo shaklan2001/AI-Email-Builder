@@ -1,13 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../api/queryKeys";
 import { clearWorkflowDraft } from "../lib/workflow-persistence";
-import { deleteWorkflow, fetchWorkflows } from "../services/workflow.service";
+import { mapQueryResult } from "../lib/map-query-result";
+import { resetRecipientCounts } from "../mocks/recipient-storage";
+import {
+  deleteWorkflow,
+  fetchWorkflows,
+  type WorkflowRecord,
+} from "../services/workflow.service";
 
 export function useWorkflows() {
-  return useQuery({
+  const query = useQuery({
     queryKey: queryKeys.workflows,
-    queryFn: fetchWorkflows,
+    queryFn: ({ signal }) => fetchWorkflows({ signal }),
   });
+
+  return {
+    ...query,
+    ...mapQueryResult(query),
+  };
 }
 
 export function useDeleteWorkflow() {
@@ -17,6 +28,10 @@ export function useDeleteWorkflow() {
     mutationFn: deleteWorkflow,
     onSuccess: (_result, workflowId) => {
       clearWorkflowDraft(workflowId);
+      resetRecipientCounts(workflowId);
+      queryClient.setQueryData<WorkflowRecord[]>(queryKeys.workflows, (current) =>
+        (current ?? []).filter((workflow) => workflow.id !== workflowId),
+      );
       void queryClient.invalidateQueries({ queryKey: queryKeys.workflows });
       queryClient.removeQueries({ queryKey: queryKeys.workflow(workflowId) });
       queryClient.removeQueries({ queryKey: queryKeys.workflowSession(workflowId) });

@@ -6,8 +6,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
-import Stack from "@mui/material/Stack";
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useDeleteWorkflow } from "../../hooks/use-workflows";
 import type { WorkflowRecord } from "../../services/workflow.service";
@@ -23,7 +22,13 @@ export function WorkflowDeleteButton({ workflow }: WorkflowDeleteButtonProps) {
   const [error, setError] = useState<string | null>(null);
   const deleteMutation = useDeleteWorkflow();
 
-  const handleOpen = () => {
+  const stopCardNavigation = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleOpen = (event: MouseEvent) => {
+    stopCardNavigation(event);
     setError(null);
     setOpen(true);
   };
@@ -36,7 +41,8 @@ export function WorkflowDeleteButton({ workflow }: WorkflowDeleteButtonProps) {
     setError(null);
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = (event: MouseEvent) => {
+    stopCardNavigation(event);
     deleteMutation.mutate(workflow.id, {
       onSuccess: () => {
         setOpen(false);
@@ -52,22 +58,18 @@ export function WorkflowDeleteButton({ workflow }: WorkflowDeleteButtonProps) {
 
   return (
     <>
-      <Stack
-        onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => event.stopPropagation()}
+      <Button
+        size="small"
+        color="error"
+        variant="outlined"
+        startIcon={<DeleteOutlineIcon />}
+        disabled={deleteMutation.isPending}
+        onClick={handleOpen}
+        onMouseDown={stopCardNavigation}
+        sx={{ flexShrink: 0 }}
       >
-        <Button
-          size="small"
-          color="error"
-          variant="outlined"
-          startIcon={<DeleteOutlineIcon />}
-          disabled={deleteMutation.isPending}
-          onClick={handleOpen}
-          sx={{ alignSelf: "flex-start" }}
-        >
-          Delete
-        </Button>
-      </Stack>
+        Delete
+      </Button>
 
       <Dialog open={open} onClose={handleClose} fullWidth maxWidth="xs">
         <DialogTitle>Delete workflow?</DialogTitle>
