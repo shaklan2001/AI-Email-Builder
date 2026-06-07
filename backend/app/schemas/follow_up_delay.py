@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-FollowUpDelayUnit = Literal["hours", "days", "weeks"]
+FollowUpDelayUnit = Literal["minutes", "hours", "days", "weeks"]
 
 
 class FollowUpDelay(BaseModel):

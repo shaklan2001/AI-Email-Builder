@@ -39,6 +39,29 @@ async def test_company_knowledge_tool_zylabs_query() -> None:
 
 
 @pytest.mark.asyncio
+async def test_company_knowledge_ignores_pronoun_and_uses_campaign_context() -> None:
+    tool = CompanyKnowledgeTool()
+    output = await tool.run(
+        ToolRunContext(
+            workflow_id="wf_1",
+            lead_email="lead@example.com",
+            prospect_message="i like to knwo more about it",
+            company_name="sinch converse",
+            product_info="new CRM product designed for general customers",
+            audience="General Customers",
+            cta="Learn More",
+            landing_page="https://sinch.example.com",
+            campaign_name="sinch converse",
+        ),
+    )
+    assert output.data.get("company_name") == "sinch converse"
+    assert "It" not in output.summary
+    assert "new CRM product" in output.summary
+    assert output.data.get("audience") == "General Customers"
+    assert output.data.get("cta") == "Learn More"
+
+
+@pytest.mark.asyncio
 async def test_calendar_booking_tool_demo_request() -> None:
     tool = CalendarBookingTool()
     output = await tool.run(_ctx(message="Book a demo next week"))

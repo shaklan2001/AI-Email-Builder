@@ -34,6 +34,7 @@ class ConversationState(TypedDict, total=False):
     follow_up_strategy: str | None
     follow_up_delay: dict[str, object] | None
     wants_follow_up: bool | None
+    wants_cta: bool | None
     email_length: str | None
     email_length_words: int | None
     reply_strategy: str | None

@@ -2,9 +2,20 @@
 
 from app.schemas.campaign import CampaignData
 from app.services.campaign_field_policy import (
+    CTA_URL_FIELD,
     EMAIL_LENGTH_FIELD,
+    WANTS_CTA_FIELD,
     apply_field_defaults,
+    condense_product_info,
+    infer_cta_label_from_message,
     infer_product_from_minimal_message,
+    is_declining_tweaks_message,
+    is_no_cta_message,
+    is_proceed_message,
+    is_vague_product_info,
+    parse_cta_label,
+    parse_wants_cta,
+    user_wants_cta_url,
     is_skip_message,
     missing_required_fields,
     next_field_to_collect,
@@ -41,6 +52,137 @@ def test_is_skip_message_detects_phrases() -> None:
 def test_infer_product_from_minimal_message() -> None:
     assert infer_product_from_minimal_message("Chocolate business") == "Chocolate"
     assert infer_product_from_minimal_message("selling organic tea") == "Organic Tea"
+    assert infer_product_from_minimal_message("my new product") is None
+
+
+def test_is_vague_product_info() -> None:
+    assert is_vague_product_info("new product")
+    assert is_vague_product_info("my product")
+    assert is_vague_product_info("a service")
+    assert not is_vague_product_info("Half Moon Backpack")
+
+
+def test_user_wants_cta_url_when_cta_is_set() -> None:
+    campaign = CampaignData(product_info="CRM", cta="Book a Demo")
+    assert user_wants_cta_url(campaign, [], wants_cta=True) is True
+
+    default_campaign = CampaignData(product_info="CRM", cta="Learn More")
+    assert user_wants_cta_url(default_campaign, [], wants_cta=True) is True
+
+    assert user_wants_cta_url(CampaignData(product_info="CRM"), [], wants_cta=True) is False
+    assert user_wants_cta_url(default_campaign, [], wants_cta=False) is False
+
+    assert user_wants_cta_url(
+        CampaignData(product_info="CRM"),
+        [{"role": "user", "content": "use this cta link https://example.com/demo"}],
+        wants_cta=True,
+    ) is True
+
+
+def test_resolve_skip_for_cta_without_button() -> None:
+    skipped, patches = resolve_skip_for_field("cta", set(), latest_message="no")
+    assert skipped == {"cta"}
+    assert patches == {}
+
+    skipped, patches = resolve_skip_for_field(
+        "cta",
+        set(),
+        latest_message="you decide",
+    )
+    assert patches == {"cta": "Learn More"}
+
+
+def test_is_no_cta_message() -> None:
+    assert is_no_cta_message("no")
+    assert is_no_cta_message("no button please")
+    assert not is_no_cta_message("Learn More")
+
+
+def test_proceed_phrases_include_casual_approval() -> None:
+    assert is_proceed_message("everything look cool")
+    assert not is_proceed_message("no")
+    assert is_declining_tweaks_message("no")
+
+
+def test_parse_wants_cta_and_labels() -> None:
+    assert parse_wants_cta("yes") is True
+    assert parse_wants_cta("Yeah!") is True
+    assert parse_wants_cta("no") is False
+    assert parse_wants_cta("link to my company website") is True
+    assert parse_wants_cta(
+        "yes i want a cta that books the call",
+    ) is True
+    assert parse_wants_cta(
+        "no",
+        campaign=CampaignData(product_info="CRM", cta="Learn More"),
+    ) is True
+
+    assert parse_cta_label("yes") is None
+    assert parse_cta_label("Learn More") == "Learn More"
+    assert parse_cta_label("Book a Demo") == "Book a Demo"
+    assert infer_cta_label_from_message(
+        "yes i want a cta that books the call",
+    ) == "Book a Call"
+    assert infer_cta_label_from_message("book a call") == "Book a Call"
+
+
+def test_next_field_collects_cta_in_three_steps() -> None:
+    prefs = {
+        "follow_up_delay": _SAMPLE_DELAY,
+        "email_length": _SAMPLE_PREFS["email_length"],
+        "wants_follow_up": _SAMPLE_PREFS["wants_follow_up"],
+    }
+    ready = CampaignData(
+        product_info="CRM",
+        campaign_name="Outreach",
+        audience="Founders",
+    )
+    assert (
+        next_field_to_collect(ready, set(), **prefs)
+        == WANTS_CTA_FIELD
+    )
+
+    wants_only = {**prefs, "wants_cta": True}
+    assert (
+        next_field_to_collect(ready, set(), **wants_only)
+        == "cta"
+    )
+
+    labeled = CampaignData(
+        product_info="CRM",
+        campaign_name="Outreach",
+        audience="Founders",
+        cta="Book a Demo",
+    )
+    assert (
+        next_field_to_collect(labeled, set(), **{**prefs, "wants_cta": True})
+        == CTA_URL_FIELD
+    )
+
+    no_cta = CampaignData(
+        product_info="CRM",
+        campaign_name="Outreach",
+        audience="Founders",
+    )
+    assert (
+        next_field_to_collect(
+            no_cta,
+            set(),
+            **{**prefs, "wants_cta": False},
+        )
+        is None
+    )
+
+
+def test_condense_product_info_from_business_description() -> None:
+    raw = (
+        "i run a freelance mobile development componet and i want to send email "
+        "to the founders that are looking to build aap"
+    )
+    assert condense_product_info(raw) == "Freelance Mobile Development"
+
+    assert condense_product_info("cursor ai") == "cursor ai"
+    assert condense_product_info("my new product") is None
 
 
 def test_only_product_is_required() -> None:
@@ -103,8 +245,17 @@ def test_apply_field_defaults() -> None:
     resolved = apply_field_defaults(campaign)
     assert resolved.business_goal == "Product Promotion"
     assert resolved.tone == "Professional"
-    assert resolved.cta == "Learn More"
+    assert resolved.cta is None
     assert resolved.audience == "General Customers"
+
+    with_cta = apply_field_defaults(campaign, wants_cta=True)
+    assert with_cta.cta == "Learn More"
+
+    no_cta = apply_field_defaults(
+        CampaignData(product_info="Tea", cta="Learn More"),
+        wants_cta=False,
+    )
+    assert no_cta.cta is None
 
 
 def test_collection_reply_asks_next_brief_field_when_prefs_collected() -> None:
@@ -115,7 +266,6 @@ def test_collection_reply_asks_next_brief_field_when_prefs_collected() -> None:
         email_length=_SAMPLE_PREFS["email_length"],
         wants_follow_up=_SAMPLE_PREFS["wants_follow_up"],
     )
-    assert "✓ Product: Chocolate" in reply
     assert "name this campaign" in reply.lower()
 
 
@@ -157,7 +307,7 @@ def test_skip_does_not_repeat_same_optional_question() -> None:
             email_length=_SAMPLE_PREFS["email_length"],
             wants_follow_up=_SAMPLE_PREFS["wants_follow_up"],
         )
-        == "cta"
+        == WANTS_CTA_FIELD
     )
 
 
@@ -185,6 +335,7 @@ def test_skip_competitors_and_attachments_without_defaults() -> None:
         "business_goal",
         "tone",
         "audience",
+        WANTS_CTA_FIELD,
         "cta",
         "landing_page",
         "product_image",

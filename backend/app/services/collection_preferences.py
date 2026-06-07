@@ -26,6 +26,16 @@ WANTS_FOLLOW_UP_QUESTION = (
     "Reply yes to include a follow-up, or no to send only the initial email."
 )
 
+WANTS_CTA_QUESTION = (
+    "Do you want a call-to-action button in the email?\n\n"
+    "Reply yes to add one, or no to skip the button."
+)
+
+CTA_LABEL_QUESTION = (
+    "What should the CTA button say?\n\n"
+    "Examples: Learn More, Book a Call, Book a Demo, Get Started."
+)
+
 _DEFAULT_EMAIL_LENGTH: EmailLength = "medium"
 
 _LENGTH_ALIASES: dict[EmailLength, tuple[str, ...]] = {
@@ -107,6 +117,14 @@ def format_wants_follow_up_brief(wants_follow_up: bool | None) -> str:
     return "Not provided"
 
 
+def format_wants_cta_brief(wants_cta: bool | None) -> str:
+    if wants_cta is True:
+        return "Yes — include a CTA button"
+    if wants_cta is False:
+        return "No — no CTA button"
+    return "Not provided"
+
+
 def parse_email_length_detail(text: str) -> ParsedEmailLength | None:
     cleaned = text.strip().lower()
     if not cleaned:
@@ -136,12 +154,74 @@ def parse_email_length(text: str) -> EmailLength | None:
     return parsed.category if parsed is not None else None
 
 
+_FOLLOW_UP_ENABLE_INTENT = re.compile(
+    r"(?:want|need|add|include|send)\b.{0,50}follow[\s-]?(?:up|email)",
+    re.IGNORECASE,
+)
+_FOLLOW_UP_ON_NO_REPLY = re.compile(
+    r"follow[\s-]?(?:up|email).{0,80}(?:if|when).{0,40}"
+    r"(?:no\s+reply|not\s+reply|do(?:es)?n'?t\s+reply|don'?t\s+reply)",
+    re.IGNORECASE,
+)
+_NO_REPLY_CONDITION = re.compile(
+    r"(?:if|when).{0,40}(?:no\s+reply|not\s+reply|do(?:es)?\s+not\s+reply|don'?t\s+reply)",
+    re.IGNORECASE,
+)
+
+
+def is_follow_up_enable_intent(text: str) -> bool:
+    """True when the user is asking to include a no-reply follow-up email."""
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    if _FOLLOW_UP_ENABLE_INTENT.search(cleaned):
+        return True
+    if _FOLLOW_UP_ON_NO_REPLY.search(cleaned):
+        return True
+    if re.search(r"follow[\s-]?(?:up|email)", cleaned, re.IGNORECASE) and _NO_REPLY_CONDITION.search(
+        cleaned,
+    ):
+        return True
+    return False
+
+
+def follow_up_prefs_from_brief_dict(
+    brief: dict[str, object],
+) -> tuple[bool | None, object]:
+    """Read follow-up preference and delay encoded in the campaign brief snapshot."""
+    from app.services.follow_up_delay import parse_follow_up_delay
+
+    enabled = str(brief.get("followUpEnabled") or brief.get("follow_up_enabled") or "")
+    lower = enabled.lower()
+    wants: bool | None = None
+    if "yes" in lower and "follow" in lower:
+        wants = True
+    elif "no" in lower and "initial" in lower:
+        wants = False
+
+    delay = None
+    raw_delay = brief.get("followUpDelay") or brief.get("follow_up_delay")
+    if isinstance(raw_delay, str) and raw_delay.strip():
+        normalized = raw_delay.strip().lower()
+        if "none" not in normalized and "initial email only" not in normalized:
+            delay = parse_follow_up_delay(raw_delay)
+
+    return wants, delay
+
+
 def parse_wants_follow_up(text: str) -> bool | None:
     cleaned = text.strip().lower()
     if not cleaned:
         return None
 
-    if any(phrase in cleaned for phrase in _NO_PHRASES):
+    if is_follow_up_enable_intent(text):
+        return True
+
+    for phrase in _NO_PHRASES:
+        if phrase not in cleaned:
+            continue
+        if phrase in ("do not", "dont", "don't") and _NO_REPLY_CONDITION.search(cleaned):
+            continue
         return False
     if cleaned in ("n", "no."):
         return False

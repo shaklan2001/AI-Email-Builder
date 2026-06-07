@@ -44,12 +44,30 @@ class AgentToolsService:
         state = await conversation_repository.get_conversation_state(user_id, workflow_id)
         if state is None:
             return {}
+        brief = state.get("campaign_brief")
+        brief_dict = brief if isinstance(brief, dict) else {}
+
         return {
-            "campaign_name": _str_field(state, "campaign_name"),
-            "product_info": _str_field(state, "product_info"),
-            "audience": _str_field(state, "audience"),
-            "cta": _str_field(state, "cta"),
-            "landing_page": _str_field(state, "landing_page"),
+            "campaign_name": _first_str(
+                _str_field(state, "campaign_name"),
+                _brief_field(brief_dict, "campaignName", "campaign_name"),
+            ),
+            "product_info": _first_str(
+                _str_field(state, "product_info"),
+                _brief_field(brief_dict, "productInfo", "product_info"),
+            ),
+            "audience": _first_str(
+                _str_field(state, "audience"),
+                _brief_field(brief_dict, "audience"),
+            ),
+            "cta": _first_str(
+                _str_field(state, "cta"),
+                _brief_field(brief_dict, "cta"),
+            ),
+            "landing_page": _first_str(
+                _str_field(state, "landing_page"),
+                _brief_field(brief_dict, "landingPage", "landing_page"),
+            ),
         }
 
     async def run_for_prospect_message(
@@ -124,6 +142,21 @@ def _str_field(state: dict[str, object], key: str) -> str | None:
     value = state.get(key)
     if isinstance(value, str) and value.strip():
         return value.strip()
+    return None
+
+
+def _brief_field(brief: dict[str, object], *keys: str) -> str | None:
+    for key in keys:
+        value = brief.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _first_str(*values: str | None) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return None
 
 

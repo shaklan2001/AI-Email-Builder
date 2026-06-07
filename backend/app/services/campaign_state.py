@@ -56,6 +56,15 @@ def campaign_from_brief_dict(
     )
 
 
+def hydrate_campaign_from_brief(state: CampaignState) -> CampaignData:
+    """Merge persisted state with the campaign brief snapshot when fields are missing."""
+    base = campaign_data_from_state(state)
+    brief = state.get("campaign_brief")
+    if not isinstance(brief, dict) or not brief:
+        return base
+    return campaign_from_brief_dict(brief, fallback=base)
+
+
 def campaign_for_generation(state: CampaignState) -> CampaignData:
     """
     Campaign used for workflow and email generation.

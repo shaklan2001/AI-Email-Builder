@@ -6,6 +6,30 @@ import re
 
 from app.tools.base import ToolExecutionOutput, ToolRunContext
 
+_GENERIC_QUERY_TARGETS = frozenset(
+    {
+        "it",
+        "this",
+        "that",
+        "them",
+        "these",
+        "those",
+        "more",
+        "info",
+        "information",
+        "the product",
+        "your product",
+        "the company",
+        "your company",
+        "the service",
+        "your service",
+        "the crm",
+        "the tool",
+        "the software",
+        "the platform",
+    }
+)
+
 
 def _extract_company_query(message: str) -> str | None:
     patterns = (
@@ -21,9 +45,46 @@ def _extract_company_query(message: str) -> str | None:
         match = re.search(pattern, lowered, re.IGNORECASE)
         if match:
             name = match.group(1).strip()
-            if name and len(name) < 120:
+            if name and len(name) < 120 and not _is_generic_query_target(name):
                 return name.title() if name.islower() else name
     return None
+
+
+def _is_generic_query_target(name: str) -> bool:
+    cleaned = name.strip().lower()
+    if not cleaned:
+        return True
+    if cleaned in _GENERIC_QUERY_TARGETS:
+        return True
+    if len(cleaned) <= 3:
+        return True
+    if cleaned.startswith(("the ", "your ", "a ")):
+        return True
+    return False
+
+
+def _resolve_company_name(ctx: ToolRunContext, queried: str | None) -> str:
+    """Prefer campaign context over pronouns extracted from the prospect reply."""
+    if queried and not _is_generic_query_target(queried):
+        return queried
+
+    for candidate in (ctx.campaign_name, ctx.company_name):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+
+    if isinstance(ctx.product_info, str) and ctx.product_info.strip():
+        product = ctx.product_info.strip()
+        first_sentence = re.split(r"[.!?\n]", product, maxsplit=1)[0].strip()
+        if first_sentence:
+            return first_sentence
+
+    return "our company"
+
+
+def _resolve_product_line(ctx: ToolRunContext) -> str:
+    if isinstance(ctx.product_info, str) and ctx.product_info.strip():
+        return ctx.product_info.strip()
+    return "AI-powered sales outreach automation"
 
 
 class CompanyKnowledgeTool:
@@ -31,9 +92,8 @@ class CompanyKnowledgeTool:
 
     async def run(self, ctx: ToolRunContext) -> ToolExecutionOutput:
         queried = _extract_company_query(ctx.prospect_message)
-        company_name = queried or ctx.company_name or ctx.campaign_name or "our company"
-
-        product_line = ctx.product_info or "AI-powered sales outreach automation"
+        company_name = _resolve_company_name(ctx, queried)
+        product_line = _resolve_product_line(ctx)
         audience_line = ctx.audience or "B2B sales and marketing teams"
         cta_line = ctx.cta or "Book a demo"
         website = ctx.landing_page or "https://example.com"

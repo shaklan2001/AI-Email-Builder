@@ -1,4 +1,5 @@
 from celery.exceptions import MaxRetriesExceededError
+from fastapi import HTTPException
 
 from app.core.logger import get_logger
 from app.workers.async_runner import run_async, with_database
@@ -29,6 +30,8 @@ def execute_workflow_step_task(self, user_id: str, workflow_run_id: str) -> None
             user_id=user_id,
             workflow_run_id=workflow_run_id,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
             "workflow_step_task_failed",
@@ -62,6 +65,8 @@ def resume_workflow_task(self, user_id: str, workflow_run_id: str) -> None:
             user_id=user_id,
             workflow_run_id=workflow_run_id,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
             "resume_workflow_task_failed",

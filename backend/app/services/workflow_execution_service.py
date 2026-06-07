@@ -93,6 +93,19 @@ class WorkflowExecutionService:
     def _branch_for_condition(condition_result: bool) -> Literal["yes", "no"]:
         return "yes" if condition_result else "no"
 
+    @staticmethod
+    def _is_reply_check_step(step: WorkflowStep) -> bool:
+        return step.type == "reply_condition" or (
+            step.type == "condition" and step.condition == "reply_received"
+        )
+
+    @staticmethod
+    def _default_reply_check_result(step: WorkflowStep) -> bool | None:
+        """After the wait elapses with no inbound reply, take the No branch."""
+        if WorkflowExecutionService._is_reply_check_step(step):
+            return False
+        return None
+
     def _next_linear_step_id(
         self,
         steps: list[WorkflowStep],
@@ -287,6 +300,16 @@ class WorkflowExecutionService:
             assert updated is not None
             next_step = self._find_step(steps, next_step_id)
             assert next_step is not None
+
+            reply_check = self._default_reply_check_result(next_step)
+            if reply_check is not None:
+                return await self._execute_condition(
+                    run=updated,
+                    step=next_step,
+                    steps=steps,
+                    condition_result=reply_check,
+                )
+
             return StepExecutionResult(
                 workflow_run_id=updated.id,
                 step_id=current_step.id,
@@ -473,6 +496,8 @@ class WorkflowExecutionService:
         steps: list[WorkflowStep],
         condition_result: bool | None,
     ) -> StepExecutionResult:
+        if condition_result is None:
+            condition_result = self._default_reply_check_result(step)
         if condition_result is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

@@ -38,6 +38,7 @@ def empty_conversation_state(*, user_id: str, workflow_id: str) -> ConversationS
         "follow_up_strategy": None,
         "follow_up_delay": None,
         "wants_follow_up": None,
+        "wants_cta": None,
         "email_length": None,
         "email_length_words": None,
         "reply_strategy": None,

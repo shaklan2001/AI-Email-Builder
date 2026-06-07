@@ -3,6 +3,7 @@ from typing import Any
 
 from app.core.database import get_database
 from app.langgraph.state import CampaignState, ConversationState
+from app.services.conversation_state_service import sanitize_loaded_state
 
 # All ConversationState fields persisted to MongoDB (single source of truth).
 PERSISTED_STATE_FIELDS: tuple[str, ...] = (

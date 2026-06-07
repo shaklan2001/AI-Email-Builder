@@ -128,7 +128,7 @@ async def create_workflow(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> SuccessResponse[WorkflowData]:
     workflow_id = f"wf_{uuid4().hex[:12]}"
-    name = body.name or "Untitled Campaign"
+    name = body.name or "New Campaign"
     record = await workflow_repository.create(
         user_id=current_user.user_id,
         workflow_id=workflow_id,

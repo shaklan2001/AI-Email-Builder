@@ -76,6 +76,8 @@ class CampaignBriefFieldData(BaseModel):
     tone: str | None = None
     landing_page: str | None = Field(default=None, alias="landingPage")
     image_url: str | None = Field(default=None, alias="imageUrl")
+    email_length: str | None = Field(default=None, alias="emailLength")
+    follow_up_enabled: str | None = Field(default=None, alias="followUpEnabled")
     follow_up_delay: str | None = Field(default=None, alias="followUpDelay")
     reply_handling: str | None = Field(default=None, alias="replyHandling")
     tools_available: list[str] = Field(default_factory=list, alias="toolsAvailable")

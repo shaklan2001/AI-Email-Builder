@@ -28,16 +28,73 @@ from app.schemas.campaign import CampaignData
         ("3 Days", FollowUpDelay(value=3, unit="days")),
         ("7 days please", FollowUpDelay(value=7, unit="days")),
         ("2 weeks", FollowUpDelay(value=2, unit="weeks")),
+        ("yes send it after 2 min", FollowUpDelay(value=2, unit="minutes")),
+        ("2minutes", FollowUpDelay(value=2, unit="minutes")),
+        ("keep the 5-day delay", FollowUpDelay(value=5, unit="days")),
     ],
 )
 def test_parse_follow_up_delay(text: str, expected: FollowUpDelay) -> None:
     assert parse_follow_up_delay(text) == expected
 
 
+def test_is_affirmation_message() -> None:
+    from app.services.follow_up_delay import is_affirmation_message
+
+    assert is_affirmation_message("they look cool")
+    assert is_affirmation_message("yes looks good")
+    assert not is_affirmation_message("5 days")
+
+
+def test_infer_follow_up_delay_from_messages() -> None:
+    from app.services.follow_up_delay import infer_follow_up_delay_from_messages
+
+    messages = [
+        {"role": "assistant", "content": "Should we use a 5-day follow-up delay?"},
+        {"role": "user", "content": "yes"},
+    ]
+    assert infer_follow_up_delay_from_messages(messages) == FollowUpDelay(
+        value=5,
+        unit="days",
+    )
+
+
+def test_infer_follow_up_delay_from_assistant_minutes_confirmation() -> None:
+    from app.services.follow_up_delay import infer_follow_up_delay_from_messages
+
+    messages = [
+        {"role": "user", "content": "yes send it after 2 min"},
+        {
+            "role": "assistant",
+            "content": "Just to be sure, you'd like the reminder sent 2 minutes after a recipient doesn't reply, right?",
+        },
+        {"role": "user", "content": "yes"},
+    ]
+    assert infer_follow_up_delay_from_messages(messages) == FollowUpDelay(
+        value=2,
+        unit="minutes",
+    )
+
+
 def test_format_wait_label() -> None:
     assert format_wait_label(FollowUpDelay(value=3, unit="days")) == "Wait 3 Days"
     assert format_wait_label(FollowUpDelay(value=4, unit="hours")) == "Wait 4 Hours"
     assert format_wait_label(FollowUpDelay(value=1, unit="weeks")) == "Wait 1 Week"
+    assert format_wait_label(FollowUpDelay(value=2, unit="minutes")) == "Wait 2 Minutes"
+
+
+def test_workflow_definition_accepts_minute_delay() -> None:
+    from app.schemas.workflow import WorkflowDefinition, WorkflowStep
+
+    definition = WorkflowDefinition(
+        follow_up_delay=FollowUpDelay(value=2, unit="minutes"),
+        steps=[
+            WorkflowStep(id="step_1", type="send_email", name="Initial"),
+            WorkflowStep(id="step_2", type="wait", value=2, unit="minutes"),
+            WorkflowStep(id="step_3", type="reply_condition"),
+        ],
+    )
+    assert definition.follow_up_delay is not None
+    assert definition.follow_up_delay.unit == "minutes"
 
 
 def test_next_field_after_product_is_email_length() -> None:

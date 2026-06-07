@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 
 from app.core.database import get_database
+from app.models.campaign import Campaign
 from app.models.workflow_version import WorkflowVersion
 from app.repositories.workflow_repository import workflow_repository
 
@@ -13,6 +14,7 @@ _WORKFLOW_SCOPED_COLLECTIONS = (
     "inbound_replies",
     "tool_executions",
     "email_templates",
+    "email_events",
 )
 
 
@@ -44,6 +46,10 @@ class WorkflowDeleteService:
             await db[collection].delete_many({"workflow_id": workflow_id})
 
         await WorkflowVersion.find(WorkflowVersion.workflow_id == workflow_id).delete()
+        await Campaign.find(
+            Campaign.user_id == user_id,
+            Campaign.workflow_id == workflow_id,
+        ).delete()
 
         await workflow_repository.delete(user_id=user_id, workflow_id=workflow_id)
 

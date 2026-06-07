@@ -80,13 +80,17 @@ def resolve_stage(state: ConversationState) -> str:
         wants_follow_up=state.get("wants_follow_up"),
         email_length=state.get("email_length"),
     ):
+        raw_messages = state.get("messages")
+        messages = raw_messages if isinstance(raw_messages, list) else None
         next_field = next_field_to_collect(
             campaign,
             skipped,
-            include_optional=True,
+            include_optional=state.get("brief_status") == "editing",
             follow_up_delay=delay,
             wants_follow_up=state.get("wants_follow_up"),
+            wants_cta=state.get("wants_cta"),
             email_length=state.get("email_length"),
+            messages=messages,
         )
         if next_field:
             return ConversationStage.DISCOVERY

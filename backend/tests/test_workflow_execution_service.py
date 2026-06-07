@@ -1,7 +1,7 @@
 """Tests for workflow execution engine (spec 20)."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -189,7 +189,14 @@ def service(
     svc._load_workflow_definition_raw = AsyncMock(  # type: ignore[method-assign]
         return_value=sample.model_dump(),
     )
-    return svc
+
+    active_workflow = MagicMock()
+    active_workflow.status = "active"
+    with patch(
+        "app.services.workflow_execution_service.workflow_repository.get_by_id",
+        new=AsyncMock(return_value=active_workflow),
+    ):
+        yield svc
 
 
 @pytest.mark.asyncio
@@ -232,7 +239,7 @@ async def test_send_email_transitions_to_wait(
 
 
 @pytest.mark.asyncio
-async def test_wait_resume_advances_to_condition(
+async def test_wait_resume_evaluates_no_reply_condition(
     service: WorkflowExecutionService,
     run_repo: InMemoryRunRepository,
 ) -> None:
@@ -256,9 +263,9 @@ async def test_wait_resume_advances_to_condition(
 
     updated = await run_repo.get_by_id(run.id)
     assert updated is not None
-    assert updated.current_step == "step_3"
+    assert updated.current_step == "step_4"
     assert updated.status == "queued"
-    assert result.action == "scheduled_wait"
+    assert result.action == "evaluated_condition"
 
 
 @pytest.mark.asyncio
@@ -314,7 +321,7 @@ async def test_condition_routes_to_no_branch(
 
 
 @pytest.mark.asyncio
-async def test_condition_requires_result(
+async def test_reply_condition_defaults_to_no_reply_branch(
     service: WorkflowExecutionService,
     run_repo: InMemoryRunRepository,
 ) -> None:
@@ -322,6 +329,37 @@ async def test_condition_requires_result(
         workflow_id="wf_1",
         recipient_id="lead@example.com",
         current_step="step_3",
+        status="running",
+    )
+
+    result = await service.execute_step(run.id, user_id="user_1")
+
+    assert result.action == "evaluated_condition"
+    assert result.next_step_id == "step_4"
+
+
+@pytest.mark.asyncio
+async def test_condition_requires_result_for_non_reply_checks(
+    service: WorkflowExecutionService,
+    run_repo: InMemoryRunRepository,
+) -> None:
+    custom_definition = WorkflowDefinition(
+        steps=[
+            WorkflowStep(id="step_1", type="condition", condition="clicked_link"),
+            _email_step("step_2"),
+        ],
+    )
+    service._load_workflow_definition_raw = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            **custom_definition.model_dump(mode="json"),
+            "recipient_emails": ["lead@example.com"],
+        },
+    )
+
+    run = await run_repo.create(
+        workflow_id="wf_1",
+        recipient_id="lead@example.com",
+        current_step="step_1",
         status="running",
     )
 
@@ -352,7 +390,6 @@ async def test_full_no_reply_path_sends_follow_up(
         user_id="user_1",
         now=(after_send.next_execution_at or datetime.now(UTC)) + timedelta(seconds=1),
     )
-    await service.execute_step(run.id, user_id="user_1", condition_result=False)
     await service.execute_step(run.id, user_id="user_1")
     await service.execute_step(run.id, user_id="user_1")
 

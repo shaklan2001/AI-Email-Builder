@@ -4,6 +4,7 @@ from app.repositories.conversation_repository import conversation_repository
 from app.repositories.workflow_repository import workflow_repository
 from app.repositories.workflow_run_repository import workflow_run_repository
 from app.schemas.workflow import StepType, WorkflowDefinition
+from app.services.workflow_structure import normalize_for_execution
 from app.services.workflow_execution_service import (
     StepExecutionResult,
     WorkflowExecutionService,
@@ -19,13 +20,15 @@ async def _load_workflow_definition(
 ) -> WorkflowDefinition:
     record = await workflow_repository.get_by_id(user_id, workflow_id)
     if record is not None and isinstance(record.workflow_definition, dict):
-        return WorkflowDefinition.model_validate(record.workflow_definition)
+        return normalize_for_execution(
+            WorkflowDefinition.model_validate(record.workflow_definition),
+        )
 
     state = await conversation_repository.get_campaign_state(user_id, workflow_id)
     if state is not None:
         raw_workflow = state.get("workflow")
         if isinstance(raw_workflow, dict):
-            return WorkflowDefinition.model_validate(raw_workflow)
+            return normalize_for_execution(WorkflowDefinition.model_validate(raw_workflow))
 
     raise HTTPException(status_code=404, detail="Workflow not found")
 

@@ -17,6 +17,10 @@ from app.services.collection_preferences import (
 )
 from app.schemas.campaign import CampaignData
 from app.services.conversation_response import _follow_up_question, build_collection_reply
+from app.services.workflow_modification import (
+    wants_to_disable_follow_up,
+    wants_to_enable_follow_up,
+)
 
 
 def test_next_field_after_product_is_email_length() -> None:
@@ -90,6 +94,13 @@ def test_parse_email_length_and_follow_up_preference() -> None:
     assert parse_email_length("keep it medium") == "medium"
     assert parse_wants_follow_up("yes") is True
     assert parse_wants_follow_up("no follow up needed") is False
+
+
+def test_follow_up_enable_intent_handles_no_reply_condition() -> None:
+    message = "i want a follow email after 5 days if user do not reply"
+    assert parse_wants_follow_up(message) is True
+    assert not wants_to_disable_follow_up(message)
+    assert wants_to_enable_follow_up(message)
 
 
 def test_parse_bare_number_as_word_count() -> None:

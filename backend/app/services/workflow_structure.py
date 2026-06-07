@@ -81,6 +81,8 @@ def wait_days_for_step(delay: FollowUpDelay) -> int:
         return delay.value
     if delay.unit == "weeks":
         return delay.value * 7
+    if delay.unit == "minutes":
+        return max(1, delay.value // (24 * 60))
     return max(1, (delay.value + 23) // 24)
 
 

@@ -6,24 +6,30 @@ from app.providers.llm.base import LLMProvider, LLMProviderError
 from app.providers.llm.groq_provider import get_groq_provider
 from app.schemas.workflow import WorkflowDefinition, WorkflowStep
 from app.repositories.workflow_repository import workflow_repository
-from app.services.campaign_field_policy import normalize_skipped_fields, apply_field_defaults
+from app.services.campaign_field_policy import (
+    apply_field_defaults,
+    next_field_to_collect,
+    normalize_skipped_fields,
+    resolve_wants_cta,
+)
+from app.services.campaign_naming import is_placeholder_campaign_name
 from app.services.follow_up_delay import (
     follow_up_delay_from_state,
     format_follow_up_strategy,
 )
 from app.services.campaign_state import campaign_for_generation
 from app.services.conversation_response import (
-    build_brief_approval_reply,
-    build_brief_update_reply,
+    POST_GENERATION_REPLY_SYSTEM,
     build_campaign_brief,
+    build_post_generation_prompt_context,
     detect_brief_changes,
     build_post_generation_reply,
 )
-
-_POST_GENERATION_SYSTEM = """You are a sales campaign strategist. The user's workflow and emails are already built.
-Answer in one or two short sentences. Help with review, workflow changes, or activation.
-Never tell the user to manually add blocks, CTAs, images, or workflow steps — you are the builder.
-Never regenerate the full workflow unless asked."""
+from app.services.follow_up_delay import is_affirmation_message
+from app.services.workflow_modification import (
+    apply_post_generation_workflow_edit,
+    follow_up_email_needs_generation,
+)
 
 
 def _get_llm() -> LLMProvider:
@@ -50,6 +56,59 @@ def _latest_user_message(messages: list[dict[str, str]]) -> str:
     return ""
 
 
+async def _generate_missing_follow_up_email(
+    state: CampaignState,
+    updates: dict[str, object],
+) -> dict[str, object]:
+    """Generate copy for a newly added follow-up step when no draft exists."""
+    raw_workflow = updates.get("workflow")
+    if not isinstance(raw_workflow, dict):
+        return updates
+
+    try:
+        definition = WorkflowDefinition.model_validate(raw_workflow)
+    except Exception:
+        return updates
+
+    if not follow_up_email_needs_generation(definition):
+        return updates
+
+    follow_up_step = next(
+        (s for s in reversed(definition.steps) if s.type == "send_email"),
+        None,
+    )
+    if follow_up_step is None:
+        return updates
+
+    campaign = campaign_for_generation(state)
+    email_steps = [s for s in definition.steps if s.type == "send_email"]
+    try:
+        content = await email_generation_agent.generate_email_for_step(
+            campaign=campaign,
+            step=follow_up_step,
+            steps=definition.steps,
+            step_index=max(len(email_steps) - 1, 0),
+            total_email_steps=len(email_steps),
+            email_length=state.get("email_length"),
+            email_length_words=state.get("email_length_words"),
+        )
+    except LLMProviderError:
+        return updates
+
+    patched_steps: list[WorkflowStep] = []
+    for step in definition.steps:
+        if step.id == follow_up_step.id:
+            patched_steps.append(step.model_copy(update={"email": content}))
+        else:
+            patched_steps.append(step)
+
+    updated_definition = definition.model_copy(update={"steps": patched_steps})
+    return {
+        **updates,
+        "workflow": updated_definition.to_api_dict(),
+    }
+
+
 async def extract_information_node(state: CampaignState) -> dict[str, object]:
     try:
         return await campaign_collection_agent.extract_and_update(state)
@@ -65,20 +124,31 @@ async def question_generator_node(state: CampaignState) -> dict[str, object]:
     messages = list(state.get("messages") or [])
 
     if _is_post_generation_mode(state):
+        latest = _latest_user_message(messages)
+        if is_affirmation_message(latest):
+            return {
+                "assistant_reply": (
+                    "Glad those work for you! Check the Emails tab to review each draft, "
+                    "or tell me if you'd like any changes."
+                ),
+            }
+
+        workflow_edit = apply_post_generation_workflow_edit(state, latest)
+        if workflow_edit is not None:
+            if workflow_edit.pop("_generate_follow_up_email", False):
+                workflow_edit = await _generate_missing_follow_up_email(state, workflow_edit)
+            return workflow_edit
+
         llm = _get_llm()
-        user_prompt = (
-            "The campaign workflow and emails are already generated. "
-            "Recent conversation:\n"
-            + "\n".join(f"{m['role']}: {m['content']}" for m in messages[-6:])
-        )
+        user_prompt = build_post_generation_prompt_context(state, messages)
         try:
-            reply = await llm.generate(_POST_GENERATION_SYSTEM, user_prompt)
+            reply = await llm.generate(POST_GENERATION_REPLY_SYSTEM, user_prompt)
         except LLMProviderError as exc:
             raise exc
         return {"assistant_reply": reply}
 
     try:
-        reply = campaign_collection_agent.build_next_question(state)
+        reply = await campaign_collection_agent.build_next_question(state)
     except LLMProviderError as exc:
         raise exc
     return {"assistant_reply": reply}
@@ -94,6 +164,8 @@ async def generate_workflow_node(state: CampaignState) -> dict[str, object]:
     if wants_follow_up and delay is None:
         return {}
 
+    name_updates = await campaign_collection_agent.ensure_workflow_display_name(state, campaign)
+
     try:
         definition, _reply = await workflow_agent.generate_workflow(
             campaign,
@@ -104,6 +176,7 @@ async def generate_workflow_node(state: CampaignState) -> dict[str, object]:
         raise exc
 
     return {
+        **name_updates,
         "workflow": definition.to_api_dict(),
         "review_status": None,
         "regenerate_workflow": False,
@@ -166,12 +239,14 @@ async def generate_emails_node(state: CampaignState) -> dict[str, object]:
 
 async def campaign_brief_node(state: CampaignState) -> dict[str, object]:
     skipped = normalize_skipped_fields(state.get("skipped_fields"))
-    campaign = apply_field_defaults(campaign_data_from_state(state), skipped)
+    campaign = apply_field_defaults(campaign_data_from_state(state), skipped, wants_cta=state.get("wants_cta"))
     messages = list(state.get("messages") or [])
     workflow_id = state.get("workflow_id") or ""
     user_id = state.get("user_id") or ""
 
     campaign_name = campaign.campaign_name or state.get("campaign_name")
+    if isinstance(campaign_name, str):
+        campaign_name = campaign_name.strip() or None
     if workflow_id and user_id:
         record = await workflow_repository.get_by_id(user_id, workflow_id)
         if campaign_name:
@@ -180,7 +255,7 @@ async def campaign_brief_node(state: CampaignState) -> dict[str, object]:
                 workflow_id=workflow_id,
                 name=campaign_name,
             )
-        elif record is not None:
+        elif record is not None and not is_placeholder_campaign_name(record.name):
             campaign_name = record.name
 
     product_image = campaign.product_image or state.get("product_image")
@@ -194,9 +269,11 @@ async def campaign_brief_node(state: CampaignState) -> dict[str, object]:
         landing_page=landing_page,
         follow_up_delay=state.get("follow_up_delay"),
         wants_follow_up=state.get("wants_follow_up"),
+        wants_cta=resolve_wants_cta(state.get("wants_cta"), skipped),
         email_length=state.get("email_length"),
         email_length_words=state.get("email_length_words"),
         reply_handling=state.get("reply_strategy"),
+        skipped_fields=skipped,
         state_only=True,
     )
 
@@ -206,10 +283,10 @@ async def campaign_brief_node(state: CampaignState) -> dict[str, object]:
         if isinstance(previous_brief, dict)
         else []
     )
-    if isinstance(previous_brief, dict) and changes:
-        reply = build_brief_update_reply(changes)
-    else:
-        reply = build_brief_approval_reply(campaign)
+    reply = await campaign_collection_agent.build_brief_reply(
+        state,
+        changes=changes if isinstance(previous_brief, dict) and changes else None,
+    )
 
     return {
         "campaign_brief": brief.to_api_dict(),
@@ -251,6 +328,26 @@ def route_after_missing_information(state: CampaignState) -> str:
         state.get("follow_up_delay"),
         wants_follow_up=state.get("wants_follow_up"),
         email_length=state.get("email_length"),
+    ):
+        return "question_generator"
+
+    skipped = normalize_skipped_fields(state.get("skipped_fields"))
+    resolved_campaign = apply_field_defaults(
+        campaign,
+        skipped,
+        wants_cta=state.get("wants_cta"),
+    )
+    raw_messages = state.get("messages")
+    messages = raw_messages if isinstance(raw_messages, list) else None
+    if next_field_to_collect(
+        resolved_campaign,
+        skipped,
+        include_optional=state.get("brief_status") == "editing",
+        follow_up_delay=state.get("follow_up_delay"),
+        wants_follow_up=state.get("wants_follow_up"),
+        wants_cta=state.get("wants_cta"),
+        email_length=state.get("email_length"),
+        messages=messages,
     ):
         return "question_generator"
 

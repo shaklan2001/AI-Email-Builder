@@ -44,7 +44,7 @@ _REVISION_PHRASES: tuple[str, ...] = (
 _EXPLICIT_FIELD_ASSIGNMENT = re.compile(
     r"\b(?:"
     r"product(?:\s+name)?|service(?:\s+name)?|"
-    r"campag(?:n|io)n(?:\s+name)?|campaign(?:\s+name)?|"
+    r"campag(?:n|io|o)n(?:\s+name)?|campaign(?:\s+name)?|"
     r"audience|tone|cta|goal|business\s+goal|"
     r"landing\s+page|website|image(?:\s+url)?|product\s+image"
     r")\s+(?:is|as|to|=)\s+",
@@ -89,6 +89,10 @@ def should_overwrite_campaign_fields(
 ) -> bool:
     """True when user intent should replace existing campaign field values."""
     if brief_status == "editing":
+        return True
+    if brief_status == "pending_approval" and (
+        is_revision_message(text) or is_explicit_field_update(text)
+    ):
         return True
     return is_revision_message(text) or is_explicit_field_update(text)
 

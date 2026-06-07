@@ -1,9 +1,10 @@
-from app.langgraph.state import ConversationState
+from app.langgraph.state import ConversationState, campaign_data_from_state
 from app.services.conversation_state_service import (
     should_expose_brief_preview,
     should_expose_workflow_preview,
 )
 from app.schemas.campaign_brief import CampaignBriefData
+from app.schemas.conversation_stage import ConversationStage
 from app.schemas.email import GeneratedEmailContent
 from app.schemas.follow_up_delay import FollowUpDelay
 from app.schemas.requests import (
@@ -14,6 +15,9 @@ from app.schemas.requests import (
     WorkflowDefinitionData,
     WorkflowStepData,
 )
+from app.services.campaign_field_policy import has_email_length, has_wants_follow_up, normalize_skipped_fields, resolve_wants_cta
+from app.services.conversation_response import build_campaign_brief
+from app.services.conversation_stage import resolve_stage_value
 
 
 def _version_from_dict(raw: dict[str, object]) -> EmailBodyVersionData | None:
@@ -75,17 +79,53 @@ def email_from_step_dict(item: dict[str, object]) -> GeneratedEmailData | None:
         )
 
 
-def brief_from_state(state: ConversationState) -> CampaignBriefFieldData | None:
-    if not should_expose_brief_preview(state):
+def _draft_brief_from_state(state: ConversationState) -> CampaignBriefFieldData | None:
+    """Live preview while discovery is still in progress."""
+    if resolve_stage_value(state) != ConversationStage.DISCOVERY:
         return None
-    raw = state.get("campaign_brief")
-    if not raw or not isinstance(raw, dict):
+    if state.get("brief_status") in ("pending_approval", "approved", "editing"):
         return None
-    try:
-        brief = CampaignBriefData.model_validate(raw)
-    except Exception:
+
+    campaign = campaign_data_from_state(state)
+    if not campaign.product_info:
         return None
+    if not has_email_length(state.get("email_length")):
+        return None
+    if not has_wants_follow_up(state.get("wants_follow_up")):
+        return None
+
+    campaign_name = state.get("campaign_name")
+    skipped = normalize_skipped_fields(state.get("skipped_fields"))
+    wants_cta = resolve_wants_cta(state.get("wants_cta"), skipped)
+    brief = build_campaign_brief(
+        campaign,
+        campaign_name=campaign_name if isinstance(campaign_name, str) else None,
+        messages=list(state.get("messages") or []),
+        product_image=state.get("product_image") if isinstance(state.get("product_image"), str) else None,
+        landing_page=state.get("landing_page") if isinstance(state.get("landing_page"), str) else None,
+        follow_up_delay=state.get("follow_up_delay"),
+        wants_follow_up=state.get("wants_follow_up") if isinstance(state.get("wants_follow_up"), bool) else None,
+        wants_cta=wants_cta,
+        email_length=state.get("email_length") if isinstance(state.get("email_length"), str) else None,
+        email_length_words=state.get("email_length_words") if isinstance(state.get("email_length_words"), int) else None,
+        reply_handling=state.get("reply_strategy") if isinstance(state.get("reply_strategy"), str) else None,
+        skipped_fields=skipped,
+    )
     return CampaignBriefFieldData.model_validate(brief.to_api_dict())
+
+
+def brief_from_state(state: ConversationState) -> CampaignBriefFieldData | None:
+    if should_expose_brief_preview(state):
+        raw = state.get("campaign_brief")
+        if not raw or not isinstance(raw, dict):
+            return None
+        try:
+            brief = CampaignBriefData.model_validate(raw)
+        except Exception:
+            return None
+        return CampaignBriefFieldData.model_validate(brief.to_api_dict())
+
+    return _draft_brief_from_state(state)
 
 
 def workflow_from_state(state: ConversationState) -> WorkflowDefinitionData | None:

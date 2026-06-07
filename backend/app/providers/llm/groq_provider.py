@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.langsmith_usage import record_llm_token_usage
 from app.providers.llm.base import LLMProvider, LLMProviderError
 from app.schemas.campaign import CampaignData
+from app.services.campaign_field_policy import condense_product_info, is_vague_product_info
 
 _EXTRACTION_SYSTEM = """You are a sales and marketing campaign strategist.
 Extract campaign information from the conversation.
@@ -17,11 +18,12 @@ campaign_name, business_goal, product_info, audience, tone, cta, landing_page, p
 Rules:
 - If the user says skip, none, don't know, not sure, no preference, doesn't matter, recommend for me, anything works, or you decide for a field, leave that field null.
 - Only product_info is strictly required; other fields may be omitted.
-- campaign_name: user-facing campaign title when they name the campaign
-- landing_page: website or landing URL only — not product image links (normalize bare domains to https://...)
-- product_image: product image URL when the user shares a picture link
+- campaign_name: short dashboard title (2–6 words) — infer from product/goal when the user did not name the campaign
+- landing_page: website or landing URL only — never set this when the user only mentions an image URL
+- product_image: product image URL when the user shares a picture or image link (including product page links used as images)
 - audience: summarize target audience (e.g. "Age 16–35")
-- product_info: the product or service being promoted (not old products from earlier in the chat)
+- product_info: SHORT product or service name only (2–6 words). When the user describes their business in a sentence, extract only the service label (e.g. "Freelance Mobile Development") — not the full message. Put who they want to reach in audience.
+- Leave product_info null for vague phrases like "new product", "my product", or "a service"
 Do not include markdown or explanation."""
 
 _EXTRACTION_REVISION_SYSTEM = """You are a sales and marketing campaign strategist.
@@ -32,15 +34,10 @@ campaign_name, business_goal, product_info, audience, tone, cta, landing_page, p
 Rules:
 - Use ONLY the latest user message for changes — do NOT keep outdated products (e.g. AirPure) if the user switched campaigns.
 - Non-null values REPLACE previous campaign data for that field.
-- landing_page is the website URL only; product_image is the email/poster image URL only.
+- landing_page is the website URL only; product_image is the email/poster image URL only
+- If the user only wants an image URL updated, change product_image only — do not change landing_page
+- Do not store vague product names like "new product" or "my product" — leave product_info null instead
 Do not include markdown or explanation."""
-
-_QUESTION_SYSTEM = """You are a sales and marketing campaign strategist helping plan an email campaign.
-Ask exactly ONE natural, conversational follow-up question — the single most important missing detail next.
-Never ask multiple questions in one message.
-Do not repeat information the user already provided.
-Keep the reply concise (one or two short sentences)."""
-
 
 def _parse_json_object(text: str) -> dict[str, object]:
     cleaned = text.strip()
@@ -83,6 +80,11 @@ def _validate_campaign_payload(raw: dict[str, object]) -> CampaignData:
             normalized[field] = stripped or None
         else:
             normalized[field] = str(value).strip() or None
+    condensed = condense_product_info(normalized.get("product_info"))
+    if condensed is None or is_vague_product_info(condensed):
+        normalized["product_info"] = None
+    else:
+        normalized["product_info"] = condensed
     try:
         return CampaignData.model_validate(normalized)
     except Exception:
