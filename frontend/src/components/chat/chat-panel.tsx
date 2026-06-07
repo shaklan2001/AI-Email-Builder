@@ -76,9 +76,7 @@ export function ChatPanel({
         content: data.message,
       };
       onMessagesChange((prev) => [...withoutLoadingMessages(prev), assistantMessage]);
-      if (data.workflowPreview) {
-        onWorkflowChange?.(data.workflowPreview);
-      }
+      onWorkflowChange?.(data.workflowPreview);
       onCampaignBriefChange?.(data.campaignBrief, data.briefStatus);
       onReviewStateChange?.(data.reviewStatus, data.activationAllowed);
     },

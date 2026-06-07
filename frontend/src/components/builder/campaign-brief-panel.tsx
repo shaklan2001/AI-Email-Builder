@@ -44,6 +44,7 @@ interface CampaignBriefPanelProps {
   onApprove: () => void;
   onEdit: () => void;
   actionsDisabled?: boolean;
+  variant?: "approval" | "draft";
 }
 
 export function CampaignBriefPanel({
@@ -51,8 +52,10 @@ export function CampaignBriefPanel({
   onApprove,
   onEdit,
   actionsDisabled = false,
+  variant = "approval",
 }: CampaignBriefPanelProps) {
   const tools = resolveTools(brief);
+  const isDraft = variant === "draft";
 
   return (
     <Box
@@ -66,9 +69,16 @@ export function CampaignBriefPanel({
         alignItems: "stretch",
       }}
     >
-      <Typography variant="overline" color="text.secondary" sx={{ mb: 2 }}>
-        Campaign Brief
+      <Typography variant="overline" color="text.secondary" sx={{ mb: 1 }}>
+        {isDraft ? "Campaign Draft" : "Campaign Brief"}
       </Typography>
+
+      {isDraft && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          This updates as you chat. Finish answering the AI&apos;s questions — when
+          setup is complete, you&apos;ll approve the brief here to generate your workflow.
+        </Typography>
+      )}
 
       <Paper variant="outlined" sx={{ p: 2.5, flex: 1 }}>
         <Stack spacing={2}>
@@ -76,9 +86,11 @@ export function CampaignBriefPanel({
           <BriefField label="Product" value={displayValue(brief.productInfo)} />
           <BriefField label="Audience" value={displayValue(brief.audience)} />
           <BriefField label="CTA" value={displayValue(brief.cta)} />
+          {brief.cta?.trim() &&
+          !brief.cta.toLowerCase().includes("no cta") ? (
+            <BriefField label="CTA URL" value={displayValue(brief.landingPage)} />
+          ) : null}
           <BriefField label="Tone" value={displayValue(brief.tone)} />
-          <BriefField label="Landing Page" value={displayValue(brief.landingPage)} />
-          <BriefField label="Image URL" value={displayValue(brief.imageUrl)} />
           <BriefField label="Email Length" value={displayValue(brief.emailLength)} />
           <BriefField
             label="Follow-Up Email"
@@ -111,24 +123,26 @@ export function CampaignBriefPanel({
         </Stack>
       </Paper>
 
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
-        <Button
-          variant="contained"
-          onClick={onApprove}
-          disabled={actionsDisabled}
-          fullWidth
-        >
-          Looks Good
-        </Button>
-        <Button
-          variant="outlined"
-          onClick={onEdit}
-          disabled={actionsDisabled}
-          fullWidth
-        >
-          Edit Campaign Details
-        </Button>
-      </Stack>
+      {!isDraft && (
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
+          <Button
+            variant="contained"
+            onClick={onApprove}
+            disabled={actionsDisabled}
+            fullWidth
+          >
+            Looks Good
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={onEdit}
+            disabled={actionsDisabled}
+            fullWidth
+          >
+            Edit Campaign Details
+          </Button>
+        </Stack>
+      )}
     </Box>
   );
 }

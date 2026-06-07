@@ -1,5 +1,6 @@
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import { mainContentHeight } from "src/layouts/config-layout";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -166,7 +167,14 @@ export function BuilderLayout({
   }, [workflowId, recipients, recipientCounts.invalidCount]);
 
   useEffect(() => {
-    setMessages(sanitizeChatMessages(initialMessages ?? mockChatMessages));
+    setMessages((prev) => {
+      const synced = sanitizeChatMessages(initialMessages ?? mockChatMessages);
+      const loadingMessages = prev.filter((message) => message.isLoading);
+      if (loadingMessages.length === 0) {
+        return synced;
+      }
+      return [...synced, ...loadingMessages];
+    });
     setApiWorkflow(initialWorkflowDefinition);
     setCampaignBrief(initialCampaignBrief);
     setBriefStatus(initialBriefStatus);
@@ -302,7 +310,7 @@ export function BuilderLayout({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        minHeight: "calc(100vh - 56px)",
+        minHeight: mainContentHeight,
         overflow: "hidden",
       }}
     >

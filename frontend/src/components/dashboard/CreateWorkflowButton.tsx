@@ -13,6 +13,7 @@ export function CreateWorkflowButton({ size = "medium" }: CreateWorkflowButtonPr
   return (
     <Button
       variant="contained"
+      color="primary"
       startIcon={<AddIcon />}
       size={size}
       onClick={() => navigate(NEW_CAMPAIGN_PATH)}

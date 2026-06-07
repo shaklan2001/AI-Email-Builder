@@ -1,5 +1,5 @@
 import Box from "@mui/material/Box";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { AssistantMessage } from "./assistant-message";
 import type { ChatMessage } from "./types";
 import { UserMessage } from "./user-message";
@@ -8,7 +8,7 @@ interface MessageListProps {
   messages: ChatMessage[];
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export const MessageList = memo(function MessageList({ messages }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -23,6 +23,9 @@ export function MessageList({ messages }: MessageListProps) {
         overflowY: "auto",
         py: 1,
       }}
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions"
     >
       {messages.map((message) =>
         message.role === "user" ? (
@@ -38,4 +41,4 @@ export function MessageList({ messages }: MessageListProps) {
       <div ref={bottomRef} />
     </Box>
   );
-}
+});

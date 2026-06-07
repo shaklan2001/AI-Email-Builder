@@ -1,12 +1,13 @@
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
+import { memo } from "react";
 
 interface UserMessageProps {
   content: string;
 }
 
-export function UserMessage({ content }: UserMessageProps) {
+export const UserMessage = memo(function UserMessage({ content }: UserMessageProps) {
   return (
     <Box
       sx={{
@@ -33,4 +34,4 @@ export function UserMessage({ content }: UserMessageProps) {
       </Paper>
     </Box>
   );
-}
+});

@@ -34,7 +34,7 @@ export function DraftStatusBar({ saveStatus, onClearDraft }: DraftStatusBarProps
         flexShrink: 0,
         borderBottom: 1,
         borderColor: "divider",
-        bgcolor: "background.default",
+        bgcolor: "background.neutral",
       }}
     >
       {label ? (
@@ -42,12 +42,13 @@ export function DraftStatusBar({ saveStatus, onClearDraft }: DraftStatusBarProps
           size="small"
           label={label}
           color={saveStatus === "saved" ? "success" : "default"}
-          variant="outlined"
+          variant="soft"
         />
       ) : null}
 
       <Button
         size="small"
+        variant="soft"
         color="inherit"
         startIcon={<DeleteOutlineIcon />}
         onClick={onClearDraft}

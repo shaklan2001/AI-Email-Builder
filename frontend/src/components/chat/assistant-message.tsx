@@ -2,13 +2,17 @@ import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
+import { memo } from "react";
 
 interface AssistantMessageProps {
   content: string;
   isLoading?: boolean;
 }
 
-export function AssistantMessage({ content, isLoading = false }: AssistantMessageProps) {
+export const AssistantMessage = memo(function AssistantMessage({
+  content,
+  isLoading = false,
+}: AssistantMessageProps) {
   return (
     <Box
       sx={{
@@ -30,7 +34,7 @@ export function AssistantMessage({ content, isLoading = false }: AssistantMessag
       >
         {isLoading ? (
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <CircularProgress size={14} />
+            <CircularProgress size={14} aria-hidden />
             <Typography variant="body2" color="text.secondary">
               Thinking…
             </Typography>
@@ -43,4 +47,4 @@ export function AssistantMessage({ content, isLoading = false }: AssistantMessag
       </Paper>
     </Box>
   );
-}
+});

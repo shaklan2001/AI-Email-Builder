@@ -1,0 +1,19 @@
+.workflow-flow-canvas .react-flow__pane {
+  cursor: grab;
+}
+
+.workflow-flow-canvas .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.workflow-flow-canvas .react-flow__node {
+  pointer-events: none;
+}
+
+.workflow-flow-canvas .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.workflow-flow-canvas .react-flow__attribution {
+  display: none;
+}

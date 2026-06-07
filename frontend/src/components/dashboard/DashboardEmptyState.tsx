@@ -1,14 +1,13 @@
-import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
+import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import Box from "@mui/material/Box";
-import Paper from "@mui/material/Paper";
+import Card from "@mui/material/Card";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { CreateWorkflowButton } from "./CreateWorkflowButton";
 
 export function DashboardEmptyState() {
   return (
-    <Paper
-      variant="outlined"
+    <Card
       sx={{
         py: { xs: 6, sm: 8 },
         px: 3,
@@ -21,14 +20,14 @@ export function DashboardEmptyState() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            width: 64,
-            height: 64,
+            width: 72,
+            height: 72,
             borderRadius: "50%",
-            bgcolor: "action.hover",
+            bgcolor: (theme) => theme.palette.primary.lighter,
             color: "primary.main",
           }}
         >
-          <AccountTreeOutlinedIcon sx={{ fontSize: 32 }} />
+          <MailOutlineIcon sx={{ fontSize: 36 }} />
         </Box>
 
         <Stack spacing={1}>
@@ -40,6 +39,6 @@ export function DashboardEmptyState() {
 
         <CreateWorkflowButton size="large" />
       </Stack>
-    </Paper>
+    </Card>
   );
 }

@@ -24,7 +24,11 @@ export async function apiClient<T>(path: string, init?: RequestInit): Promise<T>
     }
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+    signal: init?.signal,
+  });
   if (!res.ok) {
     throw new Error(await parseApiError(res));
   }

@@ -1,16 +1,15 @@
 import Box from "@mui/material/Box";
 import { Outlet } from "react-router-dom";
+import DashboardLayout from "src/layouts/dashboard/layout";
 import { ApiAuthSetup } from "./ApiAuthSetup";
-import { AppNavbar } from "./AppNavbar";
 
 export function AppLayout() {
   return (
-    <Box sx={{ minHeight: "100vh" }}>
+    <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <ApiAuthSetup />
-      <AppNavbar />
-      <Box component="main" sx={{ pt: "56px" }}>
+      <DashboardLayout>
         <Outlet />
-      </Box>
+      </DashboardLayout>
     </Box>
   );
 }

@@ -102,8 +102,14 @@ export function PreviewPanel({
 }: PreviewPanelProps) {
   const [activeTab, setActiveTab] = useState<PreviewTab>("workflow");
 
-  const showBrief =
+  const showBriefApproval =
     briefStatus === "pending_approval" && campaignBrief !== null;
+  const showDraftBrief =
+    campaignBrief !== null &&
+    !showBriefApproval &&
+    briefStatus !== "approved" &&
+    briefStatus !== "editing";
+  const showBrief = showBriefApproval || showDraftBrief;
   const showReviewPanel =
     Boolean(workflowDefinition?.steps?.length) && !showBrief;
 
@@ -144,6 +150,7 @@ export function PreviewPanel({
           onApprove={onBriefApprove ?? (() => undefined)}
           onEdit={onBriefEdit ?? (() => undefined)}
           actionsDisabled={briefActionsDisabled}
+          variant={showBriefApproval ? "approval" : "draft"}
         />
       </Paper>
     );
@@ -231,7 +238,9 @@ export function PreviewPanel({
             sx={{
               flex: 1,
               minHeight: 0,
-              overflowY: "auto",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
             }}
           >
             <WorkflowPreview
@@ -274,7 +283,7 @@ export function PreviewPanel({
               workflowId={workflowId}
               workflowDefinition={workflowDefinition}
               onWorkflowChange={onWorkflowChange}
-              onWorkflowOptimisticChange={onWorkflowChange}
+              campaignName={campaignBrief?.campaignName}
               embedded
             />
           ) : (
