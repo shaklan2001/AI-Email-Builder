@@ -1,4 +1,4 @@
-export type FollowUpDelayUnit = "hours" | "days" | "weeks";
+export type FollowUpDelayUnit = "minutes" | "hours" | "days" | "weeks";
 
 export interface FollowUpDelay {
   value: number;

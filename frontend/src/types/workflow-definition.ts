@@ -32,7 +32,7 @@ export interface WorkflowStep {
   name?: string;
   days?: number;
   value?: number;
-  unit?: "hours" | "days" | "weeks";
+  unit?: "minutes" | "hours" | "days" | "weeks";
   condition?: string;
   branch?: "yes" | "no";
   email?: GeneratedEmail;
